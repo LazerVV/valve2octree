@@ -9,6 +9,11 @@ layer is inserted under the map so the engine does not cull the interior.
 The script also reads the player start from the map so the spawn position
 matches the original level.  Use it for experimenting with real brush data.
 
+`voxel_fill.py` is a simplified converter that instead fills each brush volume
+with solid voxels so rectangular brushes appear with the correct proportions.
+It keeps textures per side but does not try to optimise the number of cubes,
+making it useful for visual checks.
+
 Try to use the files in the red-eclipse-code-src/ directory to understand how to make it work.
 
 If necessary also check out hexdump.txt of empty-ish example map (it dumps the file "empty" as in repo) and severely_outdated_documentation.txt .
