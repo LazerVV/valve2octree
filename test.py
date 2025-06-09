@@ -65,7 +65,9 @@ def write_redeclipse_cfg(filename: str) -> None:
     try:
         with open(filename, "w", encoding="utf-8") as cfg:
             cfg.write("setshader stdworld\n")
-            cfg.write("texture 0 default.png\n")
+            cfg.write("texture 0 textures/sky.png\n")
+            cfg.write("setshader stdworld\n")
+            cfg.write("texture 1 textures/edit/edit_1.png\n")
         print(f"Generated map config: {filename}")
     except Exception as exc:
         print(f"Error writing config: {exc}")
