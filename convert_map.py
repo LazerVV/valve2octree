@@ -139,53 +139,25 @@ def build_grid(brushes: List[Brush], offset):
         gz0 = int((zmin+offset[2])/VOXEL_SIZE)
         gz1 = int((zmax+offset[2]-1)/VOXEL_SIZE)
 
-        # only draw a single voxel layer for each oriented face. this prevents
-        # brushes from filling the entire room volume which made the map appear
-        # solid previously.
-        for orient, tex in b.textures.items():
-            idx = ORIENT_INDEX[orient]
-            if orient == 'x-':
-                x = gx0
-                for y in range(gy0, gy1 + 1):
-                    for z in range(gz0, gz1 + 1):
-                        cell = grid[z][y][x]
-                        cell['solid'] = True
-                        cell['tex'][idx] = tex
-            elif orient == 'x+':
-                x = gx1
-                for y in range(gy0, gy1 + 1):
-                    for z in range(gz0, gz1 + 1):
-                        cell = grid[z][y][x]
-                        cell['solid'] = True
-                        cell['tex'][idx] = tex
-            elif orient == 'y-':
-                y = gy0
-                for x in range(gx0, gx1 + 1):
-                    for z in range(gz0, gz1 + 1):
-                        cell = grid[z][y][x]
-                        cell['solid'] = True
-                        cell['tex'][idx] = tex
-            elif orient == 'y+':
-                y = gy1
-                for x in range(gx0, gx1 + 1):
-                    for z in range(gz0, gz1 + 1):
-                        cell = grid[z][y][x]
-                        cell['solid'] = True
-                        cell['tex'][idx] = tex
-            elif orient == 'z-':
-                z = gz0
-                for x in range(gx0, gx1 + 1):
-                    for y in range(gy0, gy1 + 1):
-                        cell = grid[z][y][x]
-                        cell['solid'] = True
-                        cell['tex'][idx] = tex
-            elif orient == 'z+':
-                z = gz1
-                for x in range(gx0, gx1 + 1):
-                    for y in range(gy0, gy1 + 1):
-                        cell = grid[z][y][x]
-                        cell['solid'] = True
-                        cell['tex'][idx] = tex
+        for x in range(gx0, gx1 + 1):
+            for y in range(gy0, gy1 + 1):
+                for z in range(gz0, gz1 + 1):
+                    cell = grid[z][y][x]
+                    cell['solid'] = True
+                    for orient, tex in b.textures.items():
+                        idx = ORIENT_INDEX[orient]
+                        if orient == 'x-' and x == gx0:
+                            cell['tex'][idx] = tex
+                        elif orient == 'x+' and x == gx1:
+                            cell['tex'][idx] = tex
+                        elif orient == 'y-' and y == gy0:
+                            cell['tex'][idx] = tex
+                        elif orient == 'y+' and y == gy1:
+                            cell['tex'][idx] = tex
+                        elif orient == 'z-' and z == gz0:
+                            cell['tex'][idx] = tex
+                        elif orient == 'z+' and z == gz1:
+                            cell['tex'][idx] = tex
     # add a solid base underneath the level so that the engine does not cull
     # the interior of our generated voxels
     base_thickness = 2  # two voxels ~= 32 units
