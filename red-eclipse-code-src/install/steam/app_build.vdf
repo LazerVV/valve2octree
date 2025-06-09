@@ -1,0 +1,14 @@
+"appbuild"
+{
+    "appid" "~REPAPPID~"
+    "desc" "~REPDESC~"
+    "buildoutput" "output"
+    "contentroot" "content"
+    "setlive" "~REPBRANCH~"
+    "preview" "0"
+    "local" ""
+    "depots"
+    {
+        "~REPDEPOT~" "depot_build.vdf"
+    }
+}

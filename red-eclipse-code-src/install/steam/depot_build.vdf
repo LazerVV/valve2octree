@@ -1,0 +1,11 @@
+"DepotBuildConfig"
+{
+	"DepotID" "~REPDEPOT~"
+	"ContentRoot"	"."
+    "FileMapping"
+    {
+        "LocalPath" "*"
+        "DepotPath" "."
+        "recursive" "1"
+    }
+}
