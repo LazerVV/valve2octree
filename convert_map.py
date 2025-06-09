@@ -34,7 +34,7 @@ class Brush:
         self.textures: Dict[str, str] = {}
 
     def add_plane(self, pts, texture):
-        """Store plane points and map its predominant normal to a cube side."""
+        """Store plane points and map its normal to one of the cube sides."""
         self.planes.append((pts, texture))
         xs, ys, zs = zip(*pts)
         if self.bounds[0] is None:
@@ -47,19 +47,43 @@ class Brush:
             self.bounds[4] = min(self.bounds[4], min(zs))
             self.bounds[5] = max(self.bounds[5], max(zs))
 
-        # compute plane normal to determine orientation
-        v1 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2])
-        v2 = (pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2])
-        nx = v1[1] * v2[2] - v1[2] * v2[1]
-        ny = v1[2] * v2[0] - v1[0] * v2[2]
-        nz = v1[0] * v2[1] - v1[1] * v2[0]
-        ax, ay, az = abs(nx), abs(ny), abs(nz)
-        if ax >= ay and ax >= az:
-            orient = 'x+' if nx > 0 else 'x-'
-        elif ay >= ax and ay >= az:
-            orient = 'y+' if ny > 0 else 'y-'
+        # detect orientation via constant coordinate first
+        orient = None
+        if xs[0] == xs[1] == xs[2]:
+            orient = 'x-'
+        elif ys[0] == ys[1] == ys[2]:
+            orient = 'y-'
+        elif zs[0] == zs[1] == zs[2]:
+            orient = 'z-'
+
+        if orient is None:
+            # fall back to predominant normal component
+            v1 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2])
+            v2 = (pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2])
+            nx = v1[1] * v2[2] - v1[2] * v2[1]
+            ny = v1[2] * v2[0] - v1[0] * v2[2]
+            nz = v1[0] * v2[1] - v1[1] * v2[0]
+            ax, ay, az = abs(nx), abs(ny), abs(nz)
+            if ax >= ay and ax >= az:
+                orient = 'x+' if nx > 0 else 'x-'
+            elif ay >= ax and ay >= az:
+                orient = 'y+' if ny > 0 else 'y-'
+            else:
+                orient = 'z+' if nz > 0 else 'z-'
         else:
-            orient = 'z+' if nz > 0 else 'z-'
+            # determine sign based on plane order
+            v1 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2])
+            v2 = (pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2])
+            nx = v1[1] * v2[2] - v1[2] * v2[1]
+            ny = v1[2] * v2[0] - v1[0] * v2[2]
+            nz = v1[0] * v2[1] - v1[1] * v2[0]
+            if orient == 'x-' and nx > 0:
+                orient = 'x+'
+            elif orient == 'y-' and ny > 0:
+                orient = 'y+'
+            elif orient == 'z-' and nz > 0:
+                orient = 'z+'
+
         self.textures[orient] = texture
 
     def finalize(self):
@@ -142,6 +166,13 @@ def build_grid(brushes: List[Brush], offset):
         for x in range(gx0, gx1 + 1):
             for y in range(gy0, gy1 + 1):
                 for z in range(gz0, gz1 + 1):
+                    boundary = (
+                        x == gx0 or x == gx1 or
+                        y == gy0 or y == gy1 or
+                        z == gz0 or z == gz1
+                    )
+                    if not boundary:
+                        continue
                     cell = grid[z][y][x]
                     cell['solid'] = True
                     for orient, tex in b.textures.items():
@@ -234,7 +265,7 @@ def main():
     offset = (
         snap(WORLD_SIZE / 2 - (xmin + xmax) / 2),
         snap(WORLD_SIZE / 2 - (ymin + ymax) / 2),
-        snap(WORLD_SIZE / 2 - (zmin + zmax) / 2),
+        VOXEL_SIZE * 2 - zmin,  # align floor to base layer
     )
     grid = build_grid(brushes, offset)
     textures = gather_textures(grid)
