@@ -8,4 +8,8 @@ Try to use the files in the red-eclipse-code-src/ directory to understand how to
 
 If necessary also check out hexdump.txt of empty-ish example map (it dumps the file "empty" as in repo) and severely_outdated_documentation.txt .
 
-The correct map version is 45, don't use something else.
+See actual_maps_from_game for raw data example (might be useful for .cfg files and texturing) don't try to load massive binary blobs from there.
+
+Do not commit the generated map file `test1.mpz` (or any other `.mpz` files).
+These binaries can be produced when running `test.py` but should remain
+ignored by git. They may be safely deleted after testing.
