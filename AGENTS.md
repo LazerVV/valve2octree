@@ -2,8 +2,9 @@ I want to reverse-engineer the Cube 2: Sauerbraten map format, to write a conver
 
 The file `test.py` is still included as a minimal example to generate a toy map.
 There is also `convert_map.py` which reads `valve220_room.map` and writes a
-Red Eclipse compatible `.mpz` map using simple voxels. This script can be used
-for experimenting with real brush data.
+Red Eclipse compatible `.mpz` map using simple voxels. It pads the bottom of the
+octree with a solid floor cube to avoid the engine culling the interior. The
+script can be used for experimenting with real brush data.
 
 Try to use the files in the red-eclipse-code-src/ directory to understand how to make it work.
 

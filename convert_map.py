@@ -22,6 +22,9 @@ ORIENT_INDEX = {
 VOXEL_SIZE = 16  # 32x32x32 grid
 GRID_SIZE = WORLD_SIZE // VOXEL_SIZE
 
+# basic floor texture for the helper cubes used to avoid culling
+BASE_TEXTURE = "exx/base-crete01"
+
 pattern = re.compile(r"\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*([^\s]+)")
 
 class Brush:
@@ -127,7 +130,16 @@ def build_grid(brushes: List[Brush], offset):
                         if orient=='y-' and y==gy0: cell['tex'][idx]=tex
                         if orient=='y+' and y==gy1: cell['tex'][idx]=tex
                         if orient=='z-' and z==gz0: cell['tex'][idx]=tex
-                        if orient=='z+' and z==gz1: cell['tex'][idx]=tex
+                    if orient=='z+' and z==gz1: cell['tex'][idx]=tex
+    # add a solid base underneath the level so that the engine does not cull
+    # the interior of our generated voxels
+    base_thickness = 2  # two voxels ~= 32 units
+    for z in range(base_thickness):
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                cell = grid[z][y][x]
+                cell['solid'] = True
+                cell['tex'] = [BASE_TEXTURE]*6
     return grid
 
 
@@ -189,9 +201,12 @@ def write_cfg(filename, textures):
 def main():
     brushes=parse_valve_map('valve220_room.map')
     xmin,xmax,ymin,ymax,zmin,zmax=collect_bounds(brushes)
-    offset=(WORLD_SIZE/2 - (xmin+xmax)/2,
-            WORLD_SIZE/2 - (ymin+ymax)/2,
-            WORLD_SIZE/2 - (zmin+zmax)/2)
+    # Align the level so that voxel boundaries match the original brush layout
+    def snap(v):
+        return round(v / VOXEL_SIZE) * VOXEL_SIZE
+    offset=(snap(WORLD_SIZE/2 - (xmin+xmax)/2),
+            snap(WORLD_SIZE/2 - (ymin+ymax)/2),
+            snap(WORLD_SIZE/2 - (zmin+zmax)/2))
     grid=build_grid(brushes,offset)
     textures=gather_textures(grid)
     spawn=(144+offset[0], -144+offset[1], 16+offset[2])
