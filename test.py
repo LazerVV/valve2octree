@@ -1,27 +1,47 @@
+"""Generate a tiny Red Eclipse map for experimentation."""
+
 import struct
 import gzip
 import os
 
+# ---------------------------------------------------------------------------
+# Constants used in the map header. These mirror the C++ structs in
+# red-eclipse's source and are kept small for clarity.
+# ---------------------------------------------------------------------------
+
+MAP_VERSION = 45            # map format version to target
+WORLD_SIZE = 512            # root cube size (2^9)
+GAME_VERSION = 281          # VERSION_GAME from game/game.h
+GAME_ID = b"fps\0"          # 3 byte string + NUL terminator
+MAP_REVISION = 1
+
+# Texture slots used by the accompanying configuration. Slot 0 is the sky and
+# slot 1 will be the ground texture used for the solid cubes.
+TEXTURE_SKY = 0
+TEXTURE_GROUND = 1
+
+
 
 def write_redeclipse_map(filename: str) -> None:
-    """Create a minimal Red Eclipse .mpz map with one player start."""
+    """Create a minimal Red Eclipse .mpz map with a single player start."""
 
     try:
-        # --- map header -----------------------------------------------------
-        # struct mapz in little endian
+        # ------------------------------------------------------------------
+        # Header (struct mapz) as defined in the engine source
+        # ------------------------------------------------------------------
         header = struct.pack(
             "<4sii7i4s",
-            b"MAPZ",    # magic
-            45,         # map version used by old RE maps
-            44,         # sizeof(mapz)
-            512,        # worldsize (2^9)
-            1,          # numents
-            0,          # numpvs
-            0,          # blendmap
-            1,          # numvslots (one default slot)
-            281,        # gamever (VERSION_GAME from game/game.h)
-            1,          # revision
-            b"fps\0"    # gameid
+            b"MAPZ",           # magic
+            MAP_VERSION,       # map format version
+            44,                # sizeof(mapz)
+            WORLD_SIZE,        # worldsize (must be power of two)
+            1,                 # numents (only the player start)
+            0,                 # numpvs
+            0,                 # blendmap
+            1,                 # numvslots (one default slot)
+            GAME_VERSION,      # gamever
+            MAP_REVISION,      # revision
+            GAME_ID            # gameid
         )
 
         # --- empty map variables ------------------------------------------
@@ -31,7 +51,16 @@ def write_redeclipse_map(filename: str) -> None:
         texmru = struct.pack("<H", 1) + struct.pack("<H", 0)
 
         # --- single entity (ET_PLAYERSTART) -------------------------------
-        entbase = struct.pack("<3fB3B", 100.0, 100.0, 100.0, 3, 0, 0, 0)
+        # place the player roughly in the middle above the ground cubes
+        spawn_z = WORLD_SIZE / 2 + 50
+        entbase = struct.pack(
+            "<3fB3B",
+            WORLD_SIZE / 2,     # x
+            WORLD_SIZE / 2,     # y
+            float(spawn_z),    # z
+            3,                 # attr1: angle (yaw)
+            0, 0, 0            # reserved
+        )
         entattrs = struct.pack("<i7i", 7, *([0] * 7))
         entlinks = struct.pack("<i", 0)
         entity = entbase + entattrs + entlinks
@@ -39,10 +68,20 @@ def write_redeclipse_map(filename: str) -> None:
         # --- default vslot -------------------------------------------------
         vslot = struct.pack("<ii", 0, -1)
 
-        # --- minimal octree: root with 8 cubes ----------------------------
-        # first four cubes are solid, the rest empty (like new empty maps)
+        # --- minimal octree ------------------------------------------------
+        # Create the root cube with eight children. The lower four octants are
+        # solid ground blocks using the ground texture. The upper four are
+        # empty "air" using the sky texture.
         octree = b"".join(
-            struct.pack("<B6H", 2 if i < 4 else 1, 0, 0, 0, 0, 0, 0)
+            struct.pack(
+                "<B6H",
+                2 if i < 4 else 1,                     # cube type
+                *(
+                    [TEXTURE_GROUND] * 6
+                    if i < 4 else
+                    [TEXTURE_SKY] * 6
+                )
+            )
             for i in range(8)
         )
 
