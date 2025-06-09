@@ -3,68 +3,24 @@
 
 namespace UI
 {
-    static bool texgc = false;
-    static int lastthumbnail = 0;
-    vector<ident *> uiargs;
+    int cursortype = CURSOR_DEFAULT;
 
     FVAR(0, uitextscale, 1, 0, 0);
 
     SVAR(0, uiopencmd, "showui");
     SVAR(0, uiclosecmd, "hideui");
-
-    TVAR(IDF_PERSIST|IDF_PRELOAD, uiloadtex, "<comp:1,1,2>loading", 3);
+    SVAR(0, uiprecmd, "");
+    SVAR(0, uipostcmd, "");
 
     VAR(0, uihidden, 0, 0, 1);
     FVAR(IDF_PERSIST, uiscale, FVAR_NONZERO, 1, 100);
-    FVAR(IDF_PERSIST, uiworldscale, FVAR_NONZERO, 50, FVAR_MAX);
-
-    FVAR(IDF_PERSIST, uimaxdist, 0, 2048, FVAR_MAX);
-    FVAR(IDF_PERSIST, uimapmaxdist, 0, 2048, FVAR_MAX);
-
     VAR(IDF_PERSIST, uitextrows, 1, 48, VAR_MAX);
-    void calctextscale() { uitextscale = 1.0f/uitextrows; }
 
     VAR(IDF_PERSIST, uiscrollsteptime, 0, 50, VAR_MAX);
     VAR(IDF_PERSIST, uislidersteptime, 0, 50, VAR_MAX);
     VAR(IDF_PERSIST, uislotviewtime, 0, 25, VAR_MAX);
 
-    FVAR(IDF_PERSIST, uitipoffset, -1, 0.001f, 1);
-
-    VAR(IDF_PERSIST, uihintintime, 0, 100, VAR_MAX);
-    VAR(IDF_PERSIST, uihintholdtime, 0, 1000, VAR_MAX);
-    VAR(IDF_PERSIST, uihintouttime, 0, 3000, VAR_MAX);
-    FVAR(IDF_PERSIST, uihintoffset2d, -0.5f, 0.125f, 0.5f);
-    FVAR(IDF_PERSIST, uihintoffset3d, -0.5f, 0.0625f, 0.5f);
-    FVAR(IDF_PERSIST, uihintdist, 0.f, 56.f, FVAR_MAX);
-    ICOMMANDV(0, uihinttime, uihintintime + uihintholdtime + uihintouttime);
-
-    VARR(uilastmillis, 0);
-    VARR(uitotalmillis, 0);
-    VARR(uiclockmillis, 0);
-    VARR(uiclockticks, 0);
-    VARR(uicurtime, 0);
-
-    static Texture *loadthumbnail(const char *name, int tclamp)
-    {
-        Texture *t = textureloaded(name);
-
-        if(!t)
-        {
-            if(uiclockticks - lastthumbnail < uislotviewtime) t = textureload(uiloadtex, 0, true, false);
-            else
-            {
-                t = textureload(name, tclamp, true, false, texgc);
-                lastthumbnail = uiclockticks;
-            }
-        }
-
-        return t;
-    }
-
-    #define SETSTR(dst, src) do { \
-        if(dst) { if(dst != src && strcmp(dst, src)) { delete[] dst; dst = newstring(src); } } \
-        else dst = newstring(src); \
-    } while(0)
+    FVAR(IDF_PERSIST, uitipoffset, -1, -0.03f, 1);
 
     static void quads(float x, float y, float w, float h, float tx = 0, float ty = 0, float tw = 1, float th = 1)
     {
@@ -100,222 +56,6 @@ namespace UI
         gle::end();
     }
 
-    enum
-    {
-        ALIGN_MASK    = 0xF,
-
-        ALIGN_HMASK   = 0x3,
-        ALIGN_HSHIFT  = 0,
-        ALIGN_HNONE   = 0,
-        ALIGN_LEFT    = 1,
-        ALIGN_HCENTER = 2,
-        ALIGN_RIGHT   = 3,
-
-        ALIGN_VMASK   = 0xC,
-        ALIGN_VSHIFT  = 2,
-        ALIGN_VNONE   = 0<<2,
-        ALIGN_TOP     = 1<<2,
-        ALIGN_VCENTER = 2<<2,
-        ALIGN_BOTTOM  = 3<<2,
-
-        CLAMP_MASK    = 0xF0,
-        CLAMP_LEFT    = 0x10,
-        CLAMP_RIGHT   = 0x20,
-        CLAMP_TOP     = 0x40,
-        CLAMP_BOTTOM  = 0x80,
-
-        NO_ADJUST     = ALIGN_HNONE | ALIGN_VNONE,
-        ALIGN_DEFAULT = ALIGN_HCENTER | ALIGN_VCENTER,
-        ALIGN_WORLD   = ALIGN_HCENTER | ALIGN_TOP
-    };
-
-    enum
-    {
-        STATE_HOVER       = 1<<0,
-        STATE_PRESS       = 1<<1,
-        STATE_HOLD        = 1<<2,
-        STATE_RELEASE     = 1<<3,
-        STATE_ALT_PRESS   = 1<<4,
-        STATE_ALT_HOLD    = 1<<5,
-        STATE_ALT_RELEASE = 1<<6,
-        STATE_ESC_PRESS   = 1<<7,
-        STATE_ESC_HOLD    = 1<<8,
-        STATE_ESC_RELEASE = 1<<9,
-        STATE_SCROLL_UP   = 1<<10,
-        STATE_SCROLL_DOWN = 1<<11,
-        STATE_HIDDEN      = 1<<12,
-
-        STATE_HOLD_MASK = STATE_HOLD | STATE_ALT_HOLD | STATE_ESC_HOLD,
-
-        STATE_ALL = STATE_HOVER|STATE_PRESS|STATE_HOLD|STATE_RELEASE|STATE_ALT_PRESS|STATE_ALT_HOLD|STATE_ALT_RELEASE|STATE_ESC_PRESS|STATE_ESC_HOLD|STATE_ESC_RELEASE|STATE_SCROLL_UP|STATE_SCROLL_DOWN|STATE_HIDDEN
-    };
-
-    enum
-    {
-        SETSTATE_ANY = 0,
-        SETSTATE_INSIDE,
-        SETSTATE_FOCUSED
-    };
-
-    struct Object;
-    struct Window;
-    struct Surface;
-
-    static Object *buildparent = NULL, *inputsteal = NULL;
-
-    #define BUILD(type, o, setup, contents) do { \
-        if(buildparent) \
-        { \
-            type *o = buildparent->buildtype<type>(); \
-            if(o) \
-            { \
-                setup; \
-                o->buildchildren(contents); \
-            } \
-        } \
-    } while(0)
-
-    enum
-    {
-        CHANGE_SHADER = 1<<0,
-        CHANGE_COLOR  = 1<<1,
-        CHANGE_BLEND  = 1<<2
-    };
-    static Object *drawing = NULL;
-    static bool propagating = false;
-
-    enum { BLEND_ALPHA, BLEND_MOD, BLEND_SRC, BLEND_BUFFER, BLEND_GLOW, BLEND_MAX };
-    static int changed = 0, surfacetype = -1, surfaceinput = SURFACE_FOREGROUND, surfaceformat = 0, blendtype = BLEND_ALPHA, blendtypedef = BLEND_ALPHA;
-    static bool blendsep = false, blendsepdef = false;
-    static float *surfacehint2d = NULL, *surfacehint3d = NULL;
-
-    void setblend(int type, bool sep, bool force = false)
-    {
-        if(type < 0 || type >= BLEND_MAX) type = BLEND_ALPHA;
-
-        const GLenum mappings[BLEND_MAX][4] {
-            { GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE },
-            { GL_ZERO, GL_SRC_COLOR, GL_ONE_MINUS_DST_ALPHA, GL_ONE },
-            { GL_ONE, GL_ZERO, GL_ONE, GL_ZERO },
-            { GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA },
-            { GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ONE_MINUS_SRC_ALPHA }
-        };
-
-        if(force || blendtype != type || blendsep != sep)
-        {
-            blendtype = type;
-            blendsep = sep;
-            if(sep) glBlendFuncSeparate_(mappings[type][0], mappings[type][1], mappings[type][2], mappings[type][3]);
-            else glBlendFunc(mappings[type][0], mappings[type][1]);
-        }
-    }
-
-    void resetblend(bool force = false)
-    {
-        if(force)
-        {
-            blendtypedef = BLEND_ALPHA;
-            blendsepdef = true; // all roads lead to visor now
-        }
-        setblend(blendtypedef, blendsepdef, force);
-    }
-
-    #define UIREVCMDC(func, types, argtypes, body) \
-        ICOMMAND(0, ui##func, types, argtypes, \
-        { \
-            for(Object *o = buildparent; o != NULL; o = o->parent) \
-            { \
-                body; \
-                if(o->istype<Window>()) break; \
-            } \
-        });
-
-    #define UIREVCMDW(func, types, argtypes, body) \
-        ICOMMAND(0, ui##func, types, argtypes, \
-        { \
-            for(Object *o = buildparent; o != NULL; o = o->parent) \
-            { \
-                if(o->istype<Window>()) break; \
-                body; \
-            } \
-        });
-
-    #define UICMD(utype, uname, vname, valtype, args, body) \
-        ICOMMAND(0, ui##uname##vname, valtype, args, { \
-            if(buildparent && buildparent->istype<utype>()) \
-            { \
-                utype *o = (utype *)buildparent; \
-                body; \
-            } \
-            else if(!propagating) conoutf(colourorange, "Warning: parent %s not a %s class for ui%s%s", buildparent ? buildparent->gettype() : "<null>", #utype, #uname, #vname); \
-        });
-
-    #define UIARGB(utype, uname, vname) \
-        UICMD(utype, uname, vname, "iN$", (int *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = *val!=0; \
-            else if(*numargs < 0) intret(o->vname ? 1 : 0); \
-            else printvar(id, o->vname ? 1 : 0); \
-        });
-
-    #define UIARGK(utype, uname, vname, valtype, type, cmin, cmax, valdef) \
-        UICMD(utype, uname, vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp((valdef), cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UIARGSCALED(utype, uname, vname, valtype, type, cmin, cmax) \
-        UICMD(utype, uname, vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax) * uiscale); \
-            else if(*numargs < 0) type##ret(o->vname * uiscale); \
-            else print##type##var(id, o->vname * uiscale); \
-        });
-
-    #define UIARG(utype, uname, vname, valtype, type, cmin, cmax) \
-        UICMD(utype, uname, vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UICMDT(utype, uname, vname, valtype, args, body) \
-        ICOMMAND(0, ui##uname##vname, valtype, args, { \
-            if(buildparent && buildparent->is##uname()) \
-            { \
-                utype *o = (utype *)buildparent; \
-                body; \
-            } \
-            else if(!propagating) conoutf(colourorange, "Warning: parent %s not a %s type for ui%s%s", buildparent ? buildparent->gettype() : "<null>", #uname, #uname, #vname); \
-        });
-
-    #define UIARGTB(utype, uname, vname) \
-        UICMDT(utype, uname, vname, "iN$", (int *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = *val!=0; \
-            else if(*numargs < 0) intret(o->vname ? 1 : 0); \
-            else printvar(id, o->vname ? 1 : 0); \
-        });
-
-    #define UIARGTK(utype, uname, vname, valtype, type, cmin, cmax, valdef) \
-        UICMDT(utype, uname, vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp((valdef), cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UIARGSCALEDT(utype, uname, vname, valtype, type, cmin, cmax) \
-        UICMDT(utype, uname, vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax) * uiscale); \
-            else if(*numargs < 0) type##ret(o->vname * uiscale); \
-            else print##type##var(id, o->vname * uiscale); \
-        });
-
-    #define UIARGT(utype, uname, vname, valtype, type, cmin, cmax) \
-        UICMDT(utype, uname, vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
     struct ClipArea
     {
         float x1, y1, x2, y2;
@@ -341,36 +81,125 @@ namespace UI
 
     static vector<ClipArea> clipstack;
 
+    static void pushclip(float x, float y, float w, float h)
+    {
+        if(clipstack.empty()) glEnable(GL_SCISSOR_TEST);
+        ClipArea &c = clipstack.add(ClipArea(x, y, w, h));
+        if(clipstack.length() >= 2) c.intersect(clipstack[clipstack.length()-2]);
+        c.scissor();
+    }
+
+    static void popclip()
+    {
+        clipstack.pop();
+        if(clipstack.empty()) glDisable(GL_SCISSOR_TEST);
+        else clipstack.last().scissor();
+    }
+
     static inline bool isfullyclipped(float x, float y, float w, float h)
     {
         if(clipstack.empty()) return false;
         return clipstack.last().isfullyclipped(x, y, w, h);
     }
 
+    enum
+    {
+        ALIGN_MASK    = 0xF,
+
+        ALIGN_HMASK   = 0x3,
+        ALIGN_HSHIFT  = 0,
+        ALIGN_HNONE   = 0,
+        ALIGN_LEFT    = 1,
+        ALIGN_HCENTER = 2,
+        ALIGN_RIGHT   = 3,
+
+        ALIGN_VMASK   = 0xC,
+        ALIGN_VSHIFT  = 2,
+        ALIGN_VNONE   = 0<<2,
+        ALIGN_TOP     = 1<<2,
+        ALIGN_VCENTER = 2<<2,
+        ALIGN_BOTTOM  = 3<<2,
+
+        CLAMP_MASK    = 0xF0,
+        CLAMP_LEFT    = 0x10,
+        CLAMP_RIGHT   = 0x20,
+        CLAMP_TOP     = 0x40,
+        CLAMP_BOTTOM  = 0x80,
+
+        NO_ADJUST     = ALIGN_HNONE | ALIGN_VNONE,
+    };
+
+    enum
+    {
+        STATE_HOVER       = 1<<0,
+        STATE_PRESS       = 1<<1,
+        STATE_HOLD        = 1<<2,
+        STATE_RELEASE     = 1<<3,
+        STATE_ALT_PRESS   = 1<<4,
+        STATE_ALT_HOLD    = 1<<5,
+        STATE_ALT_RELEASE = 1<<6,
+        STATE_ESC_PRESS   = 1<<7,
+        STATE_ESC_HOLD    = 1<<8,
+        STATE_ESC_RELEASE = 1<<9,
+        STATE_SCROLL_UP   = 1<<10,
+        STATE_SCROLL_DOWN = 1<<11,
+        STATE_HIDDEN      = 1<<12,
+
+        STATE_HOLD_MASK = STATE_HOLD | STATE_ALT_HOLD | STATE_ESC_HOLD
+    };
+
+    struct Object;
+
+    static Object *buildparent = NULL;
+    static int buildchild = -1;
+
+    #define BUILD(type, o, setup, contents) do { \
+        if(buildparent) \
+        { \
+            type *o = buildparent->buildtype<type>(); \
+            setup; \
+            o->buildchildren(contents); \
+        } \
+    } while(0)
+
+    enum
+    {
+        CHANGE_SHADER = 1<<0,
+        CHANGE_COLOR  = 1<<1,
+        CHANGE_BLEND  = 1<<2
+    };
+    static int changed = 0;
+
+    static Object *drawing = NULL;
+
+    enum { BLEND_ALPHA, BLEND_MOD };
+    static int blendtype = BLEND_ALPHA;
+
+    static inline void changeblend(int type, GLenum src, GLenum dst)
+    {
+        if(blendtype != type)
+        {
+            blendtype = type;
+            glBlendFunc(src, dst);
+        }
+    }
+
+    void resetblend() { changeblend(BLEND_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); }
+    void modblend() { changeblend(BLEND_MOD, GL_ZERO, GL_SRC_COLOR); }
+
     struct Object
     {
-        static const char *curtag;
-        static int buildlevel, taglevel;
-
         Object *parent;
-        int buildchild;
         float x, y, w, h, ox, oy;
-        float lastx, lasty, lastsx, lastsy, lastw, lasth;
-        bool overridepos, drawn;
+        bool overridepos;
         uchar adjust;
-        ushort state, childstate, allowstate;
-        vector<Object *> children, orphans;
-        char *tag;
+        ushort state, childstate;
+        vector<Object *> children;
 
-        Object() : buildchild(-1), ox(0), oy(0), lastx(0), lasty(0), lastsx(0), lastsy(0), lastw(0), lasth(0),
-            overridepos(false), drawn(false), adjust(0), state(0), childstate(0), allowstate(STATE_ALL), tag(NULL) {}
-
+        Object() : ox(0), oy(0), overridepos(false), adjust(0), state(0), childstate(0) {}
         virtual ~Object()
         {
-            if(inputsteal == this)
-                inputsteal = NULL;
             clearchildren();
-            DELETEA(tag);
         }
 
         void resetlayout()
@@ -387,16 +216,16 @@ namespace UI
         {
             resetlayout();
             parent = NULL;
-            adjust = ALIGN_DEFAULT;
+            adjust = ALIGN_HCENTER | ALIGN_VCENTER;
         }
 
-        virtual uchar childalign() const { return ALIGN_DEFAULT; }
+        virtual uchar childalign() const { return ALIGN_HCENTER | ALIGN_VCENTER; }
 
         void reset(Object *parent_)
         {
             resetlayout();
             parent = parent_;
-            adjust = parent ? parent->childalign() : ALIGN_DEFAULT;
+            adjust = parent->childalign();
         }
 
         void setup()
@@ -406,7 +235,6 @@ namespace UI
         void clearchildren()
         {
             children.deletecontents();
-            orphans.deletecontents();
         }
 
         #define loopchildren(o, body) do { \
@@ -456,11 +284,6 @@ namespace UI
                 } \
                 outbody; \
             })
-
-        virtual void prepare()
-        {
-            loopchildren(o, o->prepare());
-        }
 
         virtual void layout()
         {
@@ -517,8 +340,6 @@ namespace UI
             }
 
             adjustchildren();
-            lastx = x; lasty = y;
-            lastw = w; lasth = h;
         }
 
         virtual void setalign(int xalign, int yalign)
@@ -548,11 +369,6 @@ namespace UI
         {
             x = ox = y = oy = 0;
             overridepos = false;
-        }
-
-        virtual bool isfocus() const
-        {
-            return false;
         }
 
         virtual bool target(float cx, float cy)
@@ -586,8 +402,6 @@ namespace UI
             });
             return false;
         }
-
-        virtual void init() {}
 
         virtual void startdraw() {}
         virtual void enddraw() {}
@@ -623,10 +437,6 @@ namespace UI
 
         virtual void draw(float sx, float sy)
         {
-            lastsx = sx;
-            lastsy = sy;
-            drawn = true;
-
             loopchildren(o,
             {
                 if(!isfullyclipped(sx + o->x, sy + o->y, o->w, o->h))
@@ -636,7 +446,6 @@ namespace UI
 
         void resetstate()
         {
-            drawn = false;
             state &= STATE_HOLD_MASK;
             childstate &= STATE_HOLD_MASK;
         }
@@ -646,13 +455,8 @@ namespace UI
             loopchildren(o, o->resetchildstate());
         }
 
-        bool hasstate(int chkflags) const { return allowstate&chkflags && (state & ~childstate)&chkflags; }
-        bool haschildstate(int chkflags) const
-        {
-            bool cs = allowstate&chkflags && (state | childstate)&chkflags;
-            bool steal = (this == inputsteal || !inputsteal) || (state & (STATE_SCROLL_UP|STATE_SCROLL_DOWN));
-            return cs && steal;
-        }
+        bool hasstate(int flags) const { return ((state & ~childstate) & flags) != 0; }
+        bool haschildstate(int flags) const { return ((state | childstate) & flags) != 0; }
 
         #define DOSTATES \
             DOSTATE(STATE_HOVER, hover) \
@@ -668,40 +472,35 @@ namespace UI
             DOSTATE(STATE_SCROLL_UP, scrollup) \
             DOSTATE(STATE_SCROLL_DOWN, scrolldown)
 
-        bool setstate(int state, float cx, float cy, int mask = 0, int mode = SETSTATE_INSIDE, int setflags = 0)
+        bool setstate(int state, float cx, float cy, int mask = 0, bool inside = true, int setflags = 0)
         {
             switch(state)
             {
-            #define DOSTATE(chkflags, func) case chkflags: if(allowstate&chkflags) { func##children(cx, cy, true, mask, mode, setflags | chkflags); return haschildstate(chkflags); } break;
+            #define DOSTATE(flags, func) case flags: func##children(cx, cy, mask, inside, setflags | flags); return haschildstate(flags);
             DOSTATES
             #undef DOSTATE
             }
             return false;
         }
 
-        void clearstate(int chkflags)
+        void clearstate(int flags)
         {
-            state &= ~chkflags;
-            if(childstate & chkflags)
+            state &= ~flags;
+            if(childstate & flags)
             {
-                loopchildren(o, { if((o->state | o->childstate) & chkflags) o->clearstate(chkflags); });
-                childstate &= ~chkflags;
+                loopchildren(o, { if((o->state | o->childstate) & flags) o->clearstate(flags); });
+                childstate &= ~flags;
             }
         }
 
-        #define propagatestate(o, cx, cy, mask, mode, body) \
+        #define propagatestate(o, cx, cy, mask, inside, body) \
             loopchildrenrev(o, \
             { \
                 if(((o->state | o->childstate) & mask) != mask) continue; \
                 float o##x = cx - o->x; \
                 float o##y = cy - o->y; \
-                bool oinside = true; \
-                if(mode != SETSTATE_INSIDE) \
+                if(!inside) \
                 { \
-                    if(o##x < 0.0f || o##x >= o->w || \
-                       o##y < 0.0f || o##y >= o->h) \
-                        oinside = false; \
-                    \
                     o##x = clamp(o##x, 0.0f, o->w); \
                     o##y = clamp(o##y, 0.0f, o->h); \
                     body; \
@@ -712,22 +511,18 @@ namespace UI
                 } \
             })
 
-        #define DOSTATE(chkflags, func) \
-            virtual void func##children(float cx, float cy, bool cinside, int mask, int mode, int setflags) \
+        #define DOSTATE(flags, func) \
+            virtual void func##children(float cx, float cy, int mask, bool inside, int setflags) \
             { \
-                if(!(allowstate&chkflags)) return; \
-                propagatestate(o, cx, cy, mask, mode, \
+                propagatestate(o, cx, cy, mask, inside, \
                 { \
-                    o->func##children(ox, oy, oinside, mask, mode, setflags); \
+                    o->func##children(ox, oy, mask, inside, setflags); \
                     childstate |= (o->state | o->childstate) & (setflags); \
                 }); \
-                if(mode != SETSTATE_FOCUSED || isfocus()) \
-                { \
-                    if(target(cx, cy)) state |= (setflags); \
-                    func(cx, cy, cinside); \
-                } \
+                if(target(cx, cy)) state |= (setflags); \
+                func(cx, cy); \
             } \
-            virtual void func(float cx, float cy, bool inside) {}
+            virtual void func(float cx, float cy) {}
         DOSTATES
         #undef DOSTATE
 
@@ -739,19 +534,13 @@ namespace UI
         template<class T> bool istype() const { return T::typestr() == gettype(); }
         bool isnamed(const char *name) const { return name[0] == '#' ? name == gettypename() : !strcmp(name, getname()); }
 
-        virtual bool iswindow() const { return true; }
         virtual bool isfill() const { return false; }
         virtual bool iscolour() const { return false; }
         virtual bool istext() const { return false; }
-        virtual bool isrender() const { return false; }
-        virtual bool isviewport() const { return false; }
         virtual bool isimage() const { return false; }
         virtual bool iseditor() const { return false; }
         virtual bool isclip() const { return false; }
         virtual bool isradar() const { return false; }
-        virtual bool ispreview() const { return false; }
-        virtual bool ismodelpreview() const { return false; }
-        virtual bool iskeycatcher() const { return false; }
 
         Object *find(const char *name, bool recurse = true, const Object *exclude = NULL) const
         {
@@ -782,89 +571,42 @@ namespace UI
 
         template<class T> T *buildtype()
         {
-            T *t = NULL;
-
-            if(curtag)
-            { // tag items so we can move through the list in case something was removed
-                for(int i = buildchild; i < children.length(); i++)
-                { // search the siblings in case an item before it has moved
-                    Object *o = children[i];
-                    if(!o->istype<T>() || !o->tag || strcmp(o->tag, curtag)) continue;
-                    t = (T *)o;
-                    if(i > buildchild) for(int j = i - 1; j >= buildchild; j--)
-                    { // orphan siblings up to this point so we can bring the object forward
-                        orphans.add(children[j]);
-                        children.remove(j);
-                    }
-                    break;
-                }
-                if(!t) loopv(orphans)
-                { // search the orphans in case it moved
-                    Object *o = orphans[i];
-                    if(!o->istype<T>() || !o->tag || strcmp(o->tag, curtag)) continue;
-                    children.insert(buildchild, o);
-                    orphans.remove(i);
-                    t = (T *)o;
-                    i--;
-                }
-            }
-
-            if(!t)
+            T *t;
+            if(children.inrange(buildchild))
             {
-                if(children.inrange(buildchild))
-                {
-                    Object *o = children[buildchild];
-                    if(o->istype<T>() && !o->tag) t = (T *)o;
-                    else
-                    {
-                        if(o->tag) orphans.add(o);
-                        else delete o;
-                        t = new T;
-                        children[buildchild] = t;
-                    }
-                }
+                Object *o = children[buildchild];
+                if(o->istype<T>()) t = (T *)o;
                 else
                 {
+                    delete o;
                     t = new T;
-                    children.add(t);
+                    children[buildchild] = t;
                 }
             }
-
-            t->reset(this);
-
-            if(t->tag && (!curtag || strcmp(t->tag, curtag)))
+            else
             {
-                delete[] t->tag;
-                t->tag = NULL;
+                t = new T;
+                children.add(t);
             }
-            if(!t->tag && curtag) t->tag = newstring(curtag);
-
+            t->reset(this);
             buildchild++;
             return t;
         }
 
-        void buildchildren(uint *contents, bool mapdef = false)
+        void buildchildren(uint *contents)
         {
-            if((*contents&CODE_OP_MASK) == CODE_EXIT) clearchildren();
+            if((*contents&CODE_OP_MASK) == CODE_EXIT) children.deletecontents();
             else
             {
                 Object *oldparent = buildparent;
+                int oldchild = buildchild;
                 buildparent = this;
                 buildchild = 0;
-
-                const char *oldttag = curtag;
-                if(buildlevel != taglevel) curtag = NULL;
-                buildlevel++;
-
-                DOMAP(mapdef, executeret(contents));
+                executeret(contents);
                 while(children.length() > buildchild)
                     delete children.pop();
-                orphans.deletecontents();
-
-                curtag = oldttag;
-                buildlevel--;
-
                 buildparent = oldparent;
+                buildchild = oldchild;
             }
             resetstate();
         }
@@ -872,61 +614,8 @@ namespace UI
         virtual int childcolumns() const { return children.length(); }
     };
 
-    const char *Object::curtag = NULL;
-    int Object::buildlevel = -1, Object::taglevel = -1;
-
     ICOMMAND(0, uigroup, "e", (uint *children),
         BUILD(Object, o, o->setup(), children));
-
-    #define UIOBJCMD(vname, valtype, args, body) \
-        ICOMMAND(0, ui##vname, valtype, args, { \
-            if(buildparent) \
-            { \
-                Object *o = buildparent; \
-                body; \
-            } \
-            else if(!propagating) conoutf(colourorange, "Warning: No object available for ui%s", #vname); \
-        });
-
-    #define UIOBJARGB(vname) \
-        UIOBJCMD(vname, "iN$", (int *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = *val!=0; \
-            else if(*numargs < 0) intret(o->vname ? 1 : 0); \
-            else printvar(id, o->vname ? 1 : 0); \
-        });
-
-    #define UIOBJARGK(vname, valtype, type, cmin, cmax, valdef) \
-        UIOBJCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp((valdef), cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UIOBJARGSCALED(vname, valtype, type, cmin, cmax) \
-        UIOBJCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax) * uiscale); \
-            else if(*numargs < 0) type##ret(o->vname * uiscale); \
-            else print##type##var(id, o->vname * uiscale); \
-        });
-
-    #define UIOBJARG(vname, valtype, type, cmin, cmax) \
-        UIOBJCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    UIOBJARGB(overridepos);
-    UIOBJCMD(setpos, "ff", (float *xpos, float *ypos), o->setpos(*xpos, *ypos));
-    UIOBJCMD(resetpos, "", (), o->resetpos());
-    UIOBJARG(allowstate, "b", int, 0, int(STATE_ALL));
-
-    ICOMMANDVS(0, uitype, buildparent ? buildparent->gettype() : "");
-    ICOMMANDV(0, uidrawn, buildparent && buildparent->drawn ? 1 : 0);
-    ICOMMANDVS(0, uitagid, buildparent ? buildparent->tag : "");
-    ICOMMANDVS(0, uicurtag, Object::curtag ? Object::curtag : "");
-    ICOMMANDV(0, uibuildlevel, Object::buildlevel);
-    ICOMMANDV(0, uitaglevel, Object::taglevel);
 
     static inline void stopdrawing()
     {
@@ -937,323 +626,103 @@ namespace UI
         }
     }
 
-    Surface *surface = NULL, *surfaces[SURFACE_MAX] = { NULL, NULL, NULL, NULL, NULL };
-    vector<Surface *> surfacestack;
-    Window *window = NULL;
+    struct Window;
 
-    struct Code
+    static Window *window = NULL;
+
+    enum
     {
-        char *body;
-        uint *code;
-
-        Code() : body(NULL), code(NULL) {}
-        Code(const char *str) : body(newstring(str)), code(compilecode(str)) {}
-        ~Code()
-        {
-            DELETEA(body);
-            freecode(code);
-        }
+        WINDOW_NONE = 0,
+        WINDOW_MENU = 1<<0, WINDOW_PASS = 1<<1, WINDOW_TIP = 1<<2, WINDOW_POPUP = 1<<3, WINDOW_PERSIST = 1<<4,
+        WINDOW_ALL = WINDOW_MENU|WINDOW_PASS|WINDOW_TIP|WINDOW_POPUP|WINDOW_PERSIST
     };
 
     struct Window : Object
     {
-        char *name, *dyn;
-        Code *contents, *onshow, *onhide, *vistest, *forcetest;
-        bool exclusive, mapdef, saved, menu, passthrough, tooltip, popup, persist, ontop, attached, visible;
-        int allowinput, lasthit, lastshow, lastpoke, zindex, numargs, initargs, hint;
-        float px, py, pw, ph,
-              maxdist, yaw, pitch, curyaw, curpitch, detentyaw, detentpitch,
-              scale, dist, hitx, hity;
+        char *name;
+        uint *contents, *onshow, *onhide;
+        bool allowinput, exclusive, closing;
+        int windowflags;
+        float px, py, pw, ph;
         vec2 sscale, soffset;
-        vec origin, pos;
-        tagval args[MAXARGS];
 
-        Window(const char *name_, const char *contents_, const char *onshow_, const char *onhide_, const char *vistest_, const char *forcetest_, bool mapdef_, const char *dyn_ = NULL, tagval *args_ = NULL, int numargs_ = 0) :
-            name(newstring(name_)), dyn(dyn_ && *dyn_ ? newstring(dyn_) : NULL),
-            contents(NULL), onshow(NULL), onhide(NULL), vistest(NULL), forcetest(NULL),
-            exclusive(false), mapdef(mapdef_),
-            menu(false), passthrough(false), tooltip(false), popup(false), persist(false), ontop(false), attached(false), visible(false),
-            allowinput(0), lasthit(0), lastshow(0), lastpoke(0), zindex(0), numargs(0), initargs(0), hint(0),
+        Window(const char *name, const char *contents, const char *onshow, const char *onhide, int windowflags_) :
+            name(newstring(name)),
+            contents(compilecode(contents)),
+            onshow(onshow && onshow[0] ? compilecode(onshow) : NULL),
+            onhide(onhide && onhide[0] ? compilecode(onhide) : NULL),
+            allowinput(true), exclusive(false), closing(false),
             px(0), py(0), pw(0), ph(0),
-            maxdist(0), yaw(-1), pitch(0), curyaw(0), curpitch(0), detentyaw(0), detentpitch(0),
-            scale(1), dist(0), hitx(-1), hity(-1),
-            sscale(1, 1), soffset(0, 0),
-            origin(0, 0, 0), pos(0, 0, 0)
+            sscale(1, 1), soffset(0, 0)
         {
-            if(contents_ && *contents_) contents = new Code(contents_);
-            if(onshow_ && *onshow_) onshow = new Code(onshow_);
-            if(onhide_ && *onhide_) onhide = new Code(onhide_);
-            if(vistest_ && *vistest_) vistest = new Code(vistest_);
-            if(forcetest_ && *forcetest_) forcetest = new Code(forcetest_);
-            numargs = initargs = 0;
-            loopi(MAXARGS) args[i].setnull();
-            if(args_ && numargs_ > 0)
-            {
-                numargs = initargs = min(numargs_, int(MAXARGS));
-                memcpy(args, args_, numargs*sizeof(tagval));
-            }
+            windowflags = clamp(windowflags_, 0, int(WINDOW_ALL));
         }
         ~Window()
         {
             delete[] name;
-            if(contents) delete contents;
-            if(onshow) delete onshow;
-            if(onhide) delete onhide;
-            if(vistest) delete vistest;
-            if(forcetest) delete forcetest;
-            resetargs(true);
+            freecode(contents);
+            freecode(onshow);
+            freecode(onhide);
         }
 
         static const char *typestr() { return "#Window"; }
         const char *gettype() const { return typestr(); }
         const char *getname() const { return name; }
 
-        bool iswindow() const { return true; }
-
         void build();
-
-        void resetargs(bool full = false)
-        {
-            if(full) initargs = 0;
-            numargs = initargs;
-            int n = MAXARGS - initargs;
-            loopi(n) args[i + initargs].reset();
-        }
-
-        int allocarg(int n)
-        {
-            if(n > 0) // > 0 is uiarg1, uiarg2, ... uiargN
-            {
-                if(n > MAXARGS) return -1; // not zero-indexed!
-                while(n > numargs) args[++numargs].reset(); // n at least equal numargs
-                return n - 1; // return zero indexed
-            }
-            else if(n < 0) resetargs(n < -1); // < 0 is reset
-            else if(numargs >= MAXARGS) return -1; // 0 is next arg
-            numargs++;
-            return numargs - 1;
-        }
-
-        void setarg(int val, int n = 0)
-        {
-            int arg = allocarg(n);
-            if(arg < 0) return;
-            args[arg].setint(val);
-        }
-
-        void setarg(bool val, int n = 0)
-        {
-            int arg = allocarg(n);
-            if(arg < 0) return;
-            args[arg].setint(val ? 1 : 0);
-        }
-
-        void setarg(float val, int n = 0)
-        {
-            int arg = allocarg(n);
-            if(arg < 0) return;
-            args[arg].setfloat(val);
-        }
-
-        void setarg(const char *val, int n = 0)
-        {
-            int arg = allocarg(n);
-            if(arg < 0) return;
-            args[arg].setstr(newstring(val));
-        }
-
-        void setarg(char *val, int n = 0)
-        {
-            int arg = allocarg(n);
-            if(arg < 0) return;
-            args[arg].setstr(newstring(val));
-        }
-
-        void setargs()
-        {
-            loopi(MAXARGS)
-            {
-                if(i >= numargs) uiargs[i]->reset();
-                else uiargs[i]->copyval(args[i]);
-            }
-        }
-
-        void resetworld(const vec &o = nullvec, float m = 0, float s = 1)
-        {
-            maxdist = m;
-            yaw = -1;
-            pitch = curyaw = curpitch = 0;
-            scale = s;
-            origin = pos = o;
-        }
 
         void hide()
         {
-            overridepos = false;
-            if(onhide)
-            {
-                setargs();
-                DOMAP(mapdef, executeret(onhide->code));
-            }
-            resetworld();
+            overridepos = closing = false;
+            if(onhide) execute(onhide);
         }
 
-        float getscale()
+        void show()
         {
-            if(surfacetype == SURFACE_WORLD) return scale >= 0 ? scale * uiworldscale : -scale;
-            return scale >= 0 ? scale : (0 - scale) / uiworldscale;
-        }
-
-        void show(const vec &o = nullvec, float m = 0, float y = 0, float p = 0, float s = 1, float dy = 0, float dp = 0)
-        {
-            overridepos = false;
+            overridepos = closing = false;
             state |= STATE_HIDDEN;
             clearstate(STATE_HOLD_MASK);
-
-            resetworld(o, m, s);
-
-            if(surfacetype == SURFACE_WORLD)
-            {
-                yaw = y;
-                pitch = p;
-                detentyaw = dy > 0 ? clamp(dy, 0.f, 180.f) : 0.f;
-                detentpitch = dp > 0 ? clamp(dp, 0.f, 90.f) : 0.f;
-            }
-
-            if(onshow)
-            {
-                setargs();
-                DOMAP(mapdef, executeret(onshow->code));
-            }
-
-            lastshow = uitotalmillis;
+            if(onshow) execute(onshow);
         }
 
         void setup()
         {
             Object::setup();
-
-            exclusive = passthrough = tooltip = popup = persist = ontop = attached = menu = false;
-            allowinput = zindex = hint = 0;
+            allowinput = true;
+            exclusive = false;
             px = py = pw = ph = 0;
-
-            if(surfacetype != SURFACE_WORLD) pos = origin;
-        }
-
-        void vposition()
-        {
-            float cx = 0.5f, cy = 0.5f, cz = 1;
-
-            if(vectocursor(pos, cx, cy, cz))
-            {
-                if(rendervisor == VisorSurface::VISOR) visorsurf.coords(cx, cy, cx, cy, true);
-
-                float aspect = hudw/float(hudh);
-                cx *= aspect; // convert to UI coordinate system
-
-                switch(adjust&ALIGN_HMASK)
-                {
-                    case ALIGN_LEFT:    cx -= w; break;
-                    case ALIGN_HCENTER: cx -= w * 0.5f; break;
-                    case ALIGN_RIGHT:   break;
-                }
-
-                switch(adjust&ALIGN_VMASK)
-                {
-                    case ALIGN_TOP:     cy -= h; break;
-                    case ALIGN_VCENTER: cy -= h * 0.5f; break;
-                    case ALIGN_BOTTOM:  break;
-                }
-
-                if(rendervisor != VisorSurface::VISOR || (cx > 0 && cx + w < aspect && cy > 0 && cy + h < 1))
-                { // keep away from the edges of the visor to avoid smearing
-                    setpos(cx, cy);
-                    return;
-                }
-            }
-            visible = false;
-            state = STATE_HIDDEN;
         }
 
         void layout()
         {
-            if(!visible || state&STATE_HIDDEN) { w = h = 0; return; }
-
-            Window *oldwindow = window;
+            if(state&STATE_HIDDEN) { w = h = 0; return; }
             window = this;
-
             Object::layout();
-
-            bool haspos = pos != nullvec;
-            if(hint > 0)
-            {
-                int offset = uilastmillis - hint;
-                if(offset <= uihintintime + uihintholdtime + uihintouttime)
-                {
-                    float amt = smoothinterp(offset > (uihintholdtime + uihintintime) ?
-                                    1.f - ((offset - uihintintime - uihintholdtime) / float(uihintouttime))
-                                : (offset < uihintintime ? offset / float(uihintintime) : 1.f));
-
-                    if(haspos)
-                    {
-                        vec campos = vec(camera1->o).add(vec(camera1->yaw * RAD, (camera1->pitch + fovy * (*surfacehint3d)) * RAD).mul(uihintdist));
-                        origin = vec(origin).add(vec(campos).sub(origin).mul(amt));
-                    }
-                    else
-                    {
-                        vec2 campos(aspect * 0.5f, 0.5f - *surfacehint2d), curpos(x, y);
-
-                        switch(adjust&ALIGN_HMASK)
-                        {
-                            case ALIGN_LEFT:    campos.x -= w; break;
-                            case ALIGN_HCENTER: campos.x -= w * 0.5f; break;
-                            case ALIGN_RIGHT:   break;
-                        }
-
-                        switch(adjust&ALIGN_VMASK)
-                        {
-                            case ALIGN_TOP:     campos.y -= h; break;
-                            case ALIGN_VCENTER: campos.y -= h * 0.5f; break;
-                            case ALIGN_BOTTOM:  break;
-                        }
-
-                        campos = vec2(curpos).add(vec2(campos).sub(curpos).mul(amt));
-                        setpos(campos.x, campos.y);
-
-                        *surfacehint2d = 0.5f - (campos.y < 0.5f ? campos.y + h : campos.y);
-                    }
-                }
-            }
-
-            if(surfacetype != SURFACE_WORLD && haspos) vposition();
-
-            window = oldwindow;
+            window = NULL;
         }
 
         void draw(float sx, float sy)
         {
-            if(!visible || state&STATE_HIDDEN) return;
-
-            Window *oldwindow = window;
+            if(state&STATE_HIDDEN) return;
             window = this;
 
             projection();
-            resetblend(true);
 
-            hudshader->set();
-            gle::colorf(1, 1, 1);
+            glEnable(GL_BLEND);
+            blendtype = BLEND_ALPHA;
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            resethudshader();
 
             changed = 0;
             drawing = NULL;
 
-            if(surfacetype == SURFACE_WORLD && ontop) glDisable(GL_DEPTH_TEST);
-
             Object::draw(sx, sy);
+
             stopdrawing();
 
-            if(surfacetype == SURFACE_WORLD && ontop) glEnable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
 
-            window = oldwindow;
+            window = NULL;
         }
 
         void draw()
@@ -1263,174 +732,35 @@ namespace UI
 
         void adjustchildren()
         {
-            if(!visible || state&STATE_HIDDEN) return;
-            Window *oldwindow = window;
+            if(state&STATE_HIDDEN) return;
             window = this;
             Object::adjustchildren();
-            window = oldwindow;
+            window = NULL;
         }
 
         void adjustlayout()
         {
-            if(surfacetype == SURFACE_COMPOSITE) pw = ph = 1;
-            else if(surfacetype == SURFACE_WORLD)
-            {
-                pw = w;
-                ph = h;
-            }
-            else
-            {
-                float aspect = hudw/float(hudh);
-                ph = max(max(h, w/aspect), 1.0f);
-                pw = aspect*ph;
-            }
+            float aspect = float(hudw)/hudh;
+            ph = max(max(h, w/aspect), 1.0f);
+            pw = aspect*ph;
             Object::adjustlayout(0, 0, pw, ph);
         }
 
-        bool planeintersect(const vec &o, const vec &d, const vec &p, const vec &n, vec &v)
-        {
-            float denom = d.dot(n);
-            if(fabs(denom) < FVAR_NONZERO) return false;
-            float t = vec(p).sub(o).dot(n) / denom;
-            if(t < 0) return false;
-            v = vec(o).add(vec(d).mul(t));
-            return true;
-        }
-
-        void hitintersect(const vec &o, const vec &p, const vec &n, float a, float &x, float &y)
-        {
-            vec r(1, 0, 0);
-
-            vec v, u;
-            v.cross(n, vec(1, 0, 0)).normalize();
-            u.cross(v, n).normalize();
-
-            x = vec(o).sub(p).dot(u);
-            y = vec(o).sub(p).dot(v);
-
-            if(a > 90 && a < 270) // hack
-            {
-                x = -x;
-                y = -y;
-            }
-        }
-
-        vec rotatedir(const vec &from, const vec &to, float angle)
-        {
-            // Calculate the axis of rotation
-            vec axis, faxis;
-            axis.cross(from, to);
-            axis.normalize();
-            faxis.cross(from, axis);
-            faxis.normalize();
-
-            return vec(from).mul(cosf(angle)).add(vec(axis).mul(axis.dot(from)).mul(1 - cosf(angle))).add(vec(faxis).mul(sinf(angle)));
-        }
-
-        float worldcalc()
-        {
-            pos = origin;
-            curyaw = yaw;
-            curpitch = pitch;
-
-            vec ray = vec(camera1->o).sub(pos), dir = vec(ray).normalize();
-            float offyaw, offpitch;
-            vectoyawpitch(dir, offyaw, offpitch);
-
-            if(curyaw < 0) curyaw = offyaw;
-            if(curpitch < -180 || curpitch > 180) curpitch = offpitch;
-            if(detentyaw > 0) curyaw = round(curyaw / detentyaw) * detentyaw;
-            if(detentpitch > 0) curpitch = round(curpitch / detentpitch) * detentpitch;
-            float curscale = getscale();
-
-            vec q = vec(curyaw * RAD, curpitch * RAD), n = vec(q).normalize(), up(0, 0, 1), right;
-            if(fabsf(n.z) < 1.f) right.cross(up, n).normalize();
-            else right.cross(n, up).normalize();
-            up.cross(n, right).normalize();
-
-            switch(adjust&ALIGN_HMASK)
-            {
-                case ALIGN_LEFT:    break;
-                case ALIGN_RIGHT:   pos.add(vec(right).mul(pw * curscale)); break;
-                default:            pos.add(vec(right).mul(pw * curscale * 0.5f)); break;
-            }
-            switch(adjust&ALIGN_VMASK)
-            {
-                case ALIGN_BOTTOM:  break;
-                case ALIGN_TOP:     pos.add(vec(up).mul(ph * curscale)); break;
-                default:            pos.add(vec(up).mul(ph * curscale * 0.5f)); break;
-            }
-
-            return ray.magnitude();
-        }
-
-        void getcursor(float &cx, float &cy)
-        {
-            if(uitotalmillis == lasthit)
-            {
-                cx = hitx * pw + px - x;
-                cy = hity * ph + py - y;
-                return;
-            }
-
-            if(surfacetype != SURFACE_WORLD)
-            {
-                hitx = cx;
-                hity = cy;
-            }
-            else
-            {
-                hitx = hity = -1;
-                float mag = worldcalc();
-
-                if(mag >= FVAR_NONZERO)
-                {
-                    vec n = vec(curyaw * RAD, curpitch * RAD), v;
-                    if(planeintersect(camera1->o, cursordir, pos, n, v))
-                    {
-                        float qx = 0, qy = 0, pyaw = 0, ppitch = 0, curscale = getscale();
-                        vectoyawpitch(n, pyaw, ppitch);
-                        hitintersect(v, pos, n, pyaw, qx, qy);
-                        hitx = qx / (pw * curscale);
-                        hity = qy / (ph * curscale);
-                    }
-                }
-            }
-            cx = hitx * pw + px - x;
-            cy = hity * ph + py - y;
-            lasthit = uitotalmillis;
-        }
-
-        #define DOSTATE(chkflags, func) \
-            void func##children(float cx, float cy, bool cinside, int mask, int mode, int setflags) \
+        #define DOSTATE(flags, func) \
+            void func##children(float cx, float cy, int mask, bool inside, int setflags) \
             { \
-                if(!visible || !allowinput || !(allowstate&chkflags) || state&STATE_HIDDEN || pw <= 0 || ph <= 0) return; \
-                getcursor(cx, cy); \
-                bool inside = (cx >= 0 && cy >= 0 && cx < w && cy < h); \
-                if(mode != SETSTATE_INSIDE || inside) \
-                    Object::func##children(cx, cy, inside, mask, mode, setflags); \
+                if(!allowinput || state&STATE_HIDDEN || pw <= 0 || ph <= 0) return; \
+                cx = cx*pw + px-x; \
+                cy = cy*ph + py-y; \
+                if(!inside || (cx >= 0 && cy >= 0 && cx < w && cy < h)) \
+                    Object::func##children(cx, cy, mask, inside, setflags); \
             }
         DOSTATES
         #undef DOSTATE
 
         void projection()
         {
-            if(surfacetype == SURFACE_COMPOSITE) // composites have flipped Y axis
-                hudmatrix.ortho(px, px + pw, py, py + ph, -1, 1);
-            else if(surfacetype == SURFACE_WORLD)
-            {
-                worldcalc();
-
-                hudmatrix.muld(nojittermatrix, cammatrix);
-                // hudmatrix = camprojmatrix;
-                hudmatrix.translate(pos);
-                hudmatrix.rotate_around_z(curyaw*RAD);
-                hudmatrix.rotate_around_x((curpitch - 90)*RAD);
-
-                hudmatrix.scale(getscale());
-            }
-            else hudmatrix.ortho(px, px + pw, py + ph, py, -1, 1);
-
+            hudmatrix.ortho(px, px + pw, py + ph, py, -1, 1);
             resethudmatrix();
             sscale = vec2(hudmatrix.a.x, hudmatrix.b.y).mul(0.5f);
             soffset = vec2(hudmatrix.d.x, hudmatrix.d.y).mul(0.5f).add(0.5f);
@@ -1451,346 +781,151 @@ namespace UI
                 sx2 = clamp(sx2, 0, hudw);
                 sy2 = clamp(sy2, 0, hudh);
             }
-            if(surfacetype == SURFACE_COMPOSITE) swap(sy1, sy2);
-        }
-
-        static bool compare(const Object *a, const Object *b)
-        {
-            Window *aa = (Window *)a, *bb = (Window *)b;
-
-            // newest hint windows last
-            if(aa->hint < bb->hint) return true;
-            if(aa->hint > bb->hint) return false;
-
-            // visible windows last
-            if(!aa->visible && bb->visible) return true;
-            if(aa->visible && !bb->visible) return false;
-
-            // ontop windows last
-            if(!aa->ontop && bb->ontop) return true;
-            if(aa->ontop && !bb->ontop) return false;
-
-            // zindex sort higher to last
-            if(aa->zindex < bb->zindex) return true;
-            if(aa->zindex > bb->zindex) return false;
-
-            // reverse order so further gets drawn first
-            if(aa->dist > bb->dist) return true;
-            if(aa->dist < bb->dist) return false;
-
-            if(aa->pos != nullvec && bb->pos != nullvec)
-            {   // draw bottom-up
-                if(aa->pos.z < bb->pos.z) return true;
-                if(aa->pos.z > bb->pos.z) return false;
-            }
-
-            // newest last
-            return aa->lastshow > bb->lastshow;
         }
     };
 
-    void uitag(const char *tag, uint *contents)
+    Window *uirootwindow(Object *o)
     {
-        if(!window) return;
-
-        const char *oldtag = Object::curtag;
-        int oldlevel = Object::taglevel;
-
-        Object::curtag = tag;
-        Object::taglevel = Object::buildlevel;
-
-        DOMAP(window->mapdef, executeret(contents));
-
-        Object::taglevel = oldlevel;
-        Object::curtag = oldtag;
+        while(o != NULL)
+        {
+            if(o->istype<Window>()) return (Window *)o;
+            o = o->parent;
+        }
+        return NULL;
     }
-    ICOMMAND(0, uitag, "se", (const char *tag, uint *contents), uitag(tag, contents));
+    ICOMMAND(0, uirootname, "", (), { Window *o = uirootwindow(buildparent); result(o ? o->name : ""); });
 
-    struct Blend : Object
-    {
-        int setting, sep;
+    #define UIWINCMDC(func, types, argtypes, body) \
+        ICOMMAND(0, ui##func, types, argtypes, \
+        { \
+            Object *o = uirootwindow(buildparent); \
+            if(o) { body; } \
+        });
 
-        void setup(int type_, int sep_)
-        {
-            Object::setup();
-            setting = type_;
-            sep = sep_;
-        }
-
-        static const char *typestr() { return "#Blend"; }
-        const char *gettype() const { return typestr(); }
-
-        void draw(float sx, float sy)
-        {
-            int oldblend = blendtypedef;
-            bool oldsep = blendsepdef;
-            if(setting >= 0) blendtypedef = setting;
-            if(sep >= 0) blendsepdef = sep != 0;
-            resetblend();
-            Object::draw(sx, sy);
-            blendtypedef = oldblend;
-            blendsepdef = oldsep;
-            resetblend();
-        }
-    };
-
-    ICOMMAND(0, uiblend, "iie", (int *type, int *sep, uint *children), BUILD(Blend, o, o->setup(clamp(*type, -1, BLEND_MAX-1), *sep), children));
-
-    struct Font : Object
-    {
-        char *name;
-
-        Font() : name(NULL) {}
-        ~Font() { delete[] name; }
-
-        void setup(const char *name_)
-        {
-            Object::setup();
-            SETSTR(name, name_);
-        }
-
-        static const char *typestr() { return "#Font"; }
-        const char *gettype() const { return typestr(); }
-
-        void layout()
-        {
-            pushfont(name);
-            Object::layout();
-            popfont();
-        }
-
-        void draw(float sx, float sy)
-        {
-            pushfont(name);
-            Object::draw(sx, sy);
-            popfont();
-        }
-
-        void buildchildren(uint *contents)
-        {
-            pushfont(name);
-            Object::buildchildren(contents);
-            popfont();
-        }
-
-        #define DOSTATE(chkflags, func) \
-            void func##children(float cx, float cy, bool cinside, int mask, int mode, int setflags) \
+    #define UIREVCMDC(func, types, argtypes, body) \
+        ICOMMAND(0, ui##func, types, argtypes, \
+        { \
+            for(Object *o = buildparent; o != NULL; o = o->parent) \
             { \
-                if(!(allowstate&chkflags)) return; \
-                pushfont(name); \
-                Object::func##children(cx, cy, cinside, mask, mode, setflags); \
-                popfont(); \
-            }
-        DOSTATES
-        #undef DOSTATE
+                body; \
+                if(o->istype<Window>()) break; \
+            } \
+        });
 
-        bool rawkey(int code, bool isdown)
-        {
-            pushfont(name);
-            bool result = Object::rawkey(code, isdown);
-            popfont();
-            return result;
-        }
-
-        bool key(int code, bool isdown)
-        {
-            pushfont(name);
-            bool result = Object::key(code, isdown);
-            popfont();
-            return result;
-        }
-
-        bool textinput(const char *str, int len)
-        {
-            pushfont(name);
-            bool result = Object::textinput(str, len);
-            popfont();
-            return result;
-        }
-    };
-
-    ICOMMAND(0, uifont, "se", (char *name, uint *children), BUILD(Font, o, o->setup(name), children));
-
-    #define UIWINCMD(vname, valtype, args, body) \
-        ICOMMAND(0, ui##vname, valtype, args, { \
-            if(window) \
+    #define UIREVCMDW(func, types, argtypes, body) \
+        ICOMMAND(0, ui##func, types, argtypes, \
+        { \
+            for(Object *o = buildparent; o != NULL; o = o->parent) \
             { \
-                Window *o = window; \
+                if(o->istype<Window>()) break; \
                 body; \
             } \
-            else if(!propagating) conoutf(colourorange, "Warning: No window available for ui%s", #vname); \
         });
 
-    #define UIWINARGB(vname) \
-        UIWINCMD(vname, "iN$", (int *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = *val!=0; \
-            else if(*numargs < 0) intret(o->vname ? 1 : 0); \
-            else printvar(id, o->vname ? 1 : 0); \
-        });
-
-    #define UIWINARGK(vname, valtype, type, cmin, cmax, valdef) \
-        UIWINCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp((valdef), cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UIWINARGSCALED(vname, valtype, type, cmin, cmax) \
-        UIWINCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax) * uiscale); \
-            else if(*numargs < 0) type##ret(o->vname * uiscale); \
-            else print##type##var(id, o->vname * uiscale); \
-        });
-
-    #define UIWINARG(vname, valtype, type, cmin, cmax) \
-        UIWINCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UIWINARGV(vname) \
-        UIWINCMD(vname, "fffN$", (float *x, float *y, float *z, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = vec(*x, *y, *z); \
-            else \
+    #define UICMD(uitype, uiname, vname, valtype, args, body) \
+        ICOMMAND(0, ui##uiname##vname, valtype, args, { \
+            if(buildparent && buildparent->istype<uitype>()) \
             { \
-                if(*numargs < 0) result(o->vname); \
-                else printsvar(id, o->vname); \
+                uitype *o = (uitype *)buildparent; \
+                body; \
             } \
-        }); \
-        UIWINCMD(vname##x, "fN$", (float *v, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname.x = *v; \
-            else if(*numargs < 0) floatret(o->vname.x); \
-            else printfvar(id, o->vname.x); \
-        }); \
-        UIWINCMD(vname##y, "fN$", (float *v, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname.y = *v; \
-            else if(*numargs < 0) floatret(o->vname.y); \
-            else printfvar(id, o->vname.y); \
-        }); \
-        UIWINCMD(vname##z, "fN$", (float *v, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname.z = *v; \
-            else if(*numargs < 0) floatret(o->vname.z); \
-            else printfvar(id, o->vname.z); \
         });
 
-    ICOMMANDVS(0, uiname, window ? window->name : "")
+    #define UIGETCMD(uitype, uiname, vname, type) \
+        ICOMMAND(0, uiget##uiname##vname, "", (), { \
+            if(buildparent && buildparent->istype<uitype>()) \
+            { \
+                uitype *o = (uitype *)buildparent; \
+                type##ret(o->vname); \
+            } \
+        });
 
-    UIWINARG(allowinput, "b", int, 0, 2);
-    UIWINARGB(exclusive);
-    UIWINARGB(menu);
-    UIWINARGB(passthrough);
-    UIWINARGB(tooltip);
-    UIWINARGB(popup);
-    UIWINARGB(persist);
-    UIWINARGB(ontop);
-    UIWINARGB(attached);
-    UIWINARGB(visible);
+    #define UIARGB(uitype, uiname, vname) \
+        UICMD(uitype, uiname, vname, "i", (int *val), { \
+            o->vname = *val!=0; \
+            intret(o->vname ? 1 : 0); \
+        }); \
+        UIGETCMD(uitype, uiname, vname, int);
 
-    UIWINARGV(origin);
-    UIWINARGV(pos);
-    UIWINARG(maxdist, "f", float, 0.f, FVAR_MAX);
-    UIWINARG(yaw, "f", float, -1, 360);
-    UIWINARG(pitch, "f", float, -181, 181);
-    UIWINARG(zindex, "i", int, VAR_MIN, VAR_MAX);
-    UIWINARG(hint, "i", int, 0, VAR_MAX);
+    #define UIARGK(uitype, uiname, vname, valtype, type, cmin, cmax, valdef) \
+        UICMD(uitype, uiname, vname, valtype, (type *val), { \
+            o->vname = type(clamp((valdef), cmin, cmax)); \
+            type##ret(o->vname); \
+        }); \
+        UIGETCMD(uitype, uiname, vname, type);
 
-    float getuicursorx(bool aspect = true) { return visorsurf.getcursorx(surfacetype == SURFACE_VISOR ? 1 : -1) * (aspect ? hudw / float(hudh) : 1.0f); }
-    float getuicursory() { return visorsurf.getcursory(surfacetype == SURFACE_VISOR ? 1 : -1); }
+    #define UIARGSCALED(uitype, uiname, vname, valtype, type, cmin, cmax) \
+        UICMD(uitype, uiname, vname, valtype, (type *val), { \
+            o->vname = type(clamp(*val, cmin, cmax)*uiscale); \
+            type##ret(o->vname); \
+        }); \
+        UIGETCMD(uitype, uiname, vname, type);
 
-    ICOMMANDVF(0, uicuryaw, window ? window->curyaw : -1.f);
-    ICOMMANDVF(0, uicurpitch, window ? window->curpitch : -1.f);
-    ICOMMANDVF(0, uihitx, window ? window->hitx : -1.f);
-    ICOMMANDVF(0, uihity, window ? window->hity : -1.f);
-    ICOMMANDV(0, uiworld, surfacetype == SURFACE_WORLD ? 1 : 0);
-    ICOMMANDVF(0, uicursorx, getuicursorx());
-    ICOMMANDVF(0, uicursory, getuicursory());
-    ICOMMANDVF(0, uiaspect, hudw / float(hudh));
+    #define UIARG(uitype, uiname, vname, valtype, type, cmin, cmax) \
+        UICMD(uitype, uiname, vname, valtype, (type *val), { \
+            o->vname = type(clamp(*val, cmin, cmax)); \
+            type##ret(o->vname); \
+        }); \
+        UIGETCMD(uitype, uiname, vname, type);
 
-    static void pushclip(float x, float y, float w, float h)
-    {
-        if(clipstack.empty())
-        {
-            if(surfacetype != SURFACE_WORLD) glEnable(GL_SCISSOR_TEST);
-            else glEnable(GL_STENCIL_TEST);
-        }
+    #define UICMDT(uitype, uiname, vname, valtype, args, body) \
+        ICOMMAND(0, ui##uiname##vname, valtype, args, { \
+            if(buildparent && buildparent->is##uiname()) \
+            { \
+                uitype *o = (uitype *)buildparent; \
+                body; \
+            } \
+        });
 
-        ClipArea &c = clipstack.add(ClipArea(x, y, w, h));
-        if(clipstack.length() >= 2) c.intersect(clipstack[clipstack.length()-2]);
-        c.scissor();
-    }
+    #define UIGETCMDT(uitype, uiname, vname, type) \
+        ICOMMAND(0, uiget##uiname##vname, "", (), { \
+            if(buildparent && buildparent->is##uiname()) \
+            { \
+                uitype *o = (uitype *)buildparent; \
+                type##ret(o->vname); \
+            } \
+        });
 
-    static void popclip()
-    {
-        clipstack.pop();
-        if(clipstack.empty())
-        {
-            if(surfacetype != SURFACE_WORLD) glDisable(GL_SCISSOR_TEST);
-            else glDisable(GL_STENCIL_TEST);
-        }
-        else clipstack.last().scissor();
-    }
+    #define UIARGTB(uitype, uiname, vname) \
+        UICMDT(uitype, uiname, vname, "i", (int *val), { \
+            o->vname = *val!=0; \
+            intret(o->vname ? 1 : 0); \
+        }); \
+        UIGETCMDT(uitype, uiname, vname, int);
 
-    static void enableclip()
-    {
-        if(clipstack.empty()) return;
+    #define UIARGTK(uitype, uiname, vname, valtype, type, cmin, cmax, valdef) \
+        UICMDT(uitype, uiname, vname, valtype, (type *val), { \
+            o->vname = type(clamp((valdef), cmin, cmax)); \
+            type##ret(o->vname); \
+        }); \
+        UIGETCMDT(uitype, uiname, vname, type);
 
-        if(surfacetype != SURFACE_WORLD) glEnable(GL_SCISSOR_TEST);
-        else glEnable(GL_STENCIL_TEST);
-    }
+    #define UIARGSCALEDT(uitype, uiname, vname, valtype, type, cmin, cmax) \
+        UICMDT(uitype, uiname, vname, valtype, (type *val), { \
+            o->vname = type(clamp(*val, cmin, cmax)*uiscale); \
+            type##ret(o->vname); \
+        }); \
+        UIGETCMDT(uitype, uiname, vname, type);
 
-    static void disableclip()
-    {
-        if(clipstack.empty()) return;
+    #define UIARGT(uitype, uiname, vname, valtype, type, cmin, cmax) \
+        UICMDT(uitype, uiname, vname, valtype, (type *val), { \
+            o->vname = type(clamp(*val, cmin, cmax)); \
+            type##ret(o->vname); \
+        }); \
+        UIGETCMDT(uitype, uiname, vname, type);
 
-        if(surfacetype != SURFACE_WORLD) glDisable(GL_SCISSOR_TEST);
-        else glDisable(GL_STENCIL_TEST);
-    }
+    static hashnameset<Window *> windows;
 
     void ClipArea::scissor()
     {
         int sx1, sy1, sx2, sy2;
         window->calcscissor(x1, y1, x2, y2, sx1, sy1, sx2, sy2);
-        if(surfacetype != SURFACE_WORLD) glScissor(sx1, sy1, sx2-sx1, sy2-sy1);
-        else
-        {
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            glStencilFunc(GL_ALWAYS, 0xFF, ~0);
-            glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
-
-            Shader *oldshader = Shader::lastshader;
-            hudnotextureshader->set();
-            gle::defvertex(2);
-            gle::colorf(1, 1, 1, 1);
-            gle::begin(GL_TRIANGLE_STRIP);
-            gle::attribf(x2, y1);
-            gle::attribf(x1, y1);
-            gle::attribf(x2, y2);
-            gle::attribf(x1, y2);
-            gle::end();
-            if(oldshader) oldshader->set();
-
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            glStencilFunc(GL_EQUAL, 0xFF, ~0);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-       }
+        glScissor(sx1, sy1, sx2-sx1, sy2-sy1);
     }
 
-    struct Surface : Object
+    struct World : Object
     {
-        int type, cursortype, exclcheck;
-        bool lockcursor, mousetracking, lockscroll, hasexclusive;
-        vec2 mousetrackvec;
-        float hintoffset2d, hintoffset3d;
-
-        hashnameset<Window *> windows;
-        vector<Texture *> texs;
-
-        Surface(int _type) : type(_type),
-            cursortype(CURSOR_DEFAULT), exclcheck(0), lockcursor(false), mousetracking(false), lockscroll(false), hasexclusive(false), mousetrackvec(0, 0), hintoffset2d(0), hintoffset3d(0) {}
-        ~Surface() {}
-
-        static const char *typestr() { return "#Surface"; }
+        static const char *typestr() { return "#World"; }
         const char *gettype() const { return typestr(); }
 
         #define loopwindows(o, body) do { \
@@ -1809,37 +944,18 @@ namespace UI
             } \
         } while(0)
 
-        bool checkexclusive(Window *w)
-        {
-            if(exclcheck != uitotalmillis)
-            {
-                hasexclusive = false;
-                exclcheck = uitotalmillis;
-                loopwindows(w,
-                {
-                    if(surfacetype != SURFACE_WORLD && w->exclusive)
-                    {
-                        hasexclusive = true;
-                        break;
-                    }
-                });
-            }
-            return !hasexclusive || (surfacetype != SURFACE_WORLD && w->exclusive);
-        }
-
         void adjustchildren()
         {
             loopwindows(w, w->adjustlayout());
         }
 
-        #define DOSTATE(chkflags, func) \
-            void func##children(float cx, float cy, bool cinside, int mask, int mode, int setflags) \
+        #define DOSTATE(flags, func) \
+            void func##children(float cx, float cy, int mask, bool inside, int setflags) \
             { \
-                if(!(allowstate&chkflags)) return; \
                 loopwindowsrev(w, \
                 { \
-                    if(((w->state | w->childstate) & mask) != mask || !checkexclusive(w)) continue; \
-                    w->func##children(cx, cy, cinside, mask, mode, setflags); \
+                    if(((w->state | w->childstate) & mask) != mask) continue; \
+                    w->func##children(cx, cy, mask, inside, setflags); \
                     int wflags = (w->state | w->childstate) & (setflags); \
                     if(wflags) { childstate |= wflags; break; } \
                 }); \
@@ -1847,146 +963,25 @@ namespace UI
         DOSTATES
         #undef DOSTATE
 
-        void checkinputsteal()
-        {
-            if(surfaceinput != type) return;
-
-            if(inputsteal && !inputsteal->isfocus())
-                inputsteal = NULL;
-        }
-
         void build()
         {
-            float oldtextscale = curtextscale, olduiscale = uiscale;
-            curtextscale = 1;
-            uiscale = 1;
-            pushfont();
-
-            cursortype = CURSOR_DEFAULT;
-            lockcursor = false;
-            mousetracking = false;
-            lockscroll = false;
-            hintoffset2d = uihintoffset2d;
-            hintoffset3d = uihintoffset3d;
-
-            checkinputsteal();
-            prepare();
-
-            if(surfaceinput == type)
-            {
-                setstate(STATE_HOVER, getuicursorx(false), getuicursory(), childstate&STATE_HOLD_MASK);
-                if(childstate&STATE_HOLD) setstate(STATE_HOLD, getuicursorx(false), getuicursory(), STATE_HOLD, SETSTATE_ANY);
-                if(childstate&STATE_ALT_HOLD) setstate(STATE_ALT_HOLD, getuicursorx(false), getuicursory(), STATE_ALT_HOLD, SETSTATE_ANY);
-                if(childstate&STATE_ESC_HOLD) setstate(STATE_ESC_HOLD, getuicursorx(false), getuicursory(), STATE_ESC_HOLD, SETSTATE_ANY);
-            }
-
-            calctextscale();
-
             reset();
             setup();
             loopwindows(w,
-            {   // try to get rid of any windows that aren't visible early to avoid processing
-                if(w->lastpoke && w->lastpoke != uitotalmillis)
-                {   // poke windows are updated every frame or disregarded
-                    w->visible = false;
-                    continue;
-                }
-
-                w->dist = 0.0f;
-                w->visible = true;
-
-                if(w->vistest)
-                {   // visibility test script provided
-                    w->setargs();
-                    if(!executebool(w->vistest->code))
-                    {
-                        w->visible = false;
-                        continue;
-                    }
-                }
-
-                if(w->pos != nullvec)
-                {   // can only be used for things with an actual 3d position
-                    if(w->visible)
-                    {
-                        w->dist = w->pos.dist(camera1->o);
-                        float maxdist = w->maxdist > 0 ? min(w->maxdist, uimaxdist) : uimaxdist;
-                        if(maxdist > 0 && w->dist > maxdist) w->visible = false;
-                    }
-
-                    // if(w->visible && !getvisible(camera1->o, camera1->yaw, camera1->pitch, w->pos, curfov, fovy, 0, -1))
-                    //    w->visible = false;
-
-                    if(!w->visible && w->forcetest)
-                    {   // fall back to the force test script
-                        w->setargs();
-                        if(executebool(w->forcetest->code))
-                        {
-                            w->dist = w->pos.dist(camera1->o);
-                            w->visible = true;
-                        }
-                    }
-
-                    if(!w->visible) continue;
-                }
-
-
-                uiscale = 1;
+            {
                 w->build();
-
                 if(!children.inrange(i)) break;
                 if(children[i] != w) i--;
             });
-
-            loopwindowsrev(w, if(!w->visible && !w->persist) hide(w, i));
-
-            children.sort(Window::compare);
             resetstate(); // IMPORTED
-
-            if(surfaceinput == type) checkinputsteal();
-            if(!mousetracking) mousetrackvec = vec2(0, 0);
-
-            popfont();
-            curtextscale = oldtextscale;
-            uiscale = olduiscale;
         }
 
-        void initchildren(Object *o)
-        {
-            if(!o) return;
-            o->init();
-            loopv(o->children) initchildren(o->children[i]);
-        }
-
-        void init()
-        {
-            loopwindows(w, if(w->visible) initchildren(w));
-        }
-
-        void render()
-        {
-            float oldtextscale = curtextscale, olduiscale = uiscale;
-            curtextscale = 1;
-            uiscale = 1;
-            hintoffset2d = uihintoffset2d;
-            hintoffset3d = uihintoffset3d;
-
-            pushfont();
-            layout();
-            adjustchildren();
-            draw();
-            popfont();
-
-            curtextscale = oldtextscale;
-            uiscale = olduiscale;
-        }
-
-        bool show(Window *w, const vec &pos = nullvec, float m = 0, float y = 0, float p = 0, float s = 1, float dy = 0, float dp = 0)
+        bool show(Window *w)
         {
             if(children.find(w) >= 0) return false;
             w->resetchildstate();
             children.add(w);
-            w->show(pos, m, y, p, s, dy, dp);
+            w->show();
             return true;
         }
 
@@ -2010,43 +1005,46 @@ namespace UI
         {
             loopwindowsrev(w,
             {
-                if(!w->visible || !checkexclusive(w)) continue;
-                if(surfacetype == SURFACE_WORLD || w->state&STATE_HIDDEN || w->persist) continue;
-                if(w->allowinput || w->passthrough) { hide(w, i); return true; }
+                if(w->state&STATE_HIDDEN || w->windowflags&WINDOW_PERSIST) continue;
+                if(w->allowinput || w->windowflags&WINDOW_PASS) { hide(w, i); return true; }
             });
             return false;
         }
 
-        int hideall(bool force = false)
+        int hideall()
         {
             int hidden = 0;
             loopwindowsrev(w,
             {
-                if(!force && w->persist) continue;
+                if(w->windowflags&WINDOW_PERSIST) continue;
                 hide(w, i);
                 hidden++;
             });
             return hidden;
         }
 
-        int allowinput(bool cursor, bool force = false)
+        bool hasexclusive() const
         {
-            int ret = 0;
-            if(force || surfaceinput == type) loopwindows(w,
-            {
-                if(!w->visible || !checkexclusive(w)) continue;
-                if(surfacetype == SURFACE_WORLD && !w->attached && (!cursor || w->hitx < 0 || w->hitx > 1 || w->hity < 0 || w->hity > 1)) continue;
-                if(w->allowinput && !(w->state&STATE_HIDDEN) && ret != 1) ret = max(w->allowinput, ret);
-            });
-            return ret;
+            loopwindows(w, if(w->exclusive) return true);
+            return false;
         }
 
-        bool hasmenu(bool pass = true)
+        bool allowinput() const
         {
-            if(surfaceinput == type) loopwindows(w,
+            bool hasexcl = hasexclusive();
+            loopwindows(w,
             {
-                if(!w->visible || !checkexclusive(w)) continue;
-                if(surfacetype != SURFACE_WORLD && w->menu && !(w->state&STATE_HIDDEN)) return !pass || !w->passthrough;
+                if(hasexcl && !w->exclusive) continue;
+                if(w->allowinput && !(w->state&STATE_HIDDEN)) return true;
+            });
+            return false;
+        }
+
+        bool hasmenu(bool pass = true) const
+        {
+            loopwindows(w,
+            {
+                if(w->windowflags&WINDOW_MENU && !(w->state&STATE_HIDDEN)) return !pass || !(w->windowflags&WINDOW_PASS);
             });
             return false;
         }
@@ -2055,8 +1053,7 @@ namespace UI
         {
             loopwindowsrev(w,
             {
-                if(!w->visible || !checkexclusive(w)) continue;
-                if(surfacetype != SURFACE_WORLD && (w->allowinput || w->passthrough) && !(w->state&STATE_HIDDEN)) { return w->name; }
+                if((w->allowinput || w->windowflags&WINDOW_PASS) && !(w->state&STATE_HIDDEN)) { return w->name; }
             });
             return NULL;
         }
@@ -2066,539 +1063,139 @@ namespace UI
         void draw()
         {
             if(children.empty()) return;
+            bool hasexcl = hasexclusive();
             loopwindows(w,
             {
-                if(!w->visible || !checkexclusive(w)) continue;
-                uiscale = 1;
-                if(w->tooltip) // follows cursor
-                    w->setpos(getuicursorx() - (w->w * getuicursorx(false)), getuicursory() >= 0.5f ? getuicursory() - w->h-uitipoffset : getuicursory() + hud::cursorsize + uitipoffset);
-                else if(w->popup && !w->overridepos) w->setpos(getuicursorx() - (w->w * getuicursorx(false)), getuicursory() - w->h * 0.5f);
+                if(hasexcl && !w->exclusive) continue;
+                if(w->windowflags&WINDOW_TIP) // follows cursor
+                    w->setpos((cursorx*float(hudw)/float(hudh))-(w->w*cursorx), uitipoffset >= 0 ? cursory-w->h-uitipoffset : cursory-uitipoffset);
+                else if(w->windowflags&WINDOW_POPUP && !w->overridepos)
+                    w->setpos((cursorx*float(hudw)/float(hudh))-(w->w*cursorx), cursory-w->h*0.5f);
+            });
+            loopwindows(w,
+            {
+                if(hasexcl && !w->exclusive) continue;
                 w->draw();
             });
         }
     };
 
-    #define UISURFCMD(vname, valtype, args, body) \
-        ICOMMAND(0, ui##vname, valtype, args, { \
-            if(surface) \
-            { \
-                Surface *o = surface; \
-                body; \
-            } \
-            else if(!propagating) conoutf(colourorange, "Warning: No surface available for ui%s", #vname); \
-        });
-
-    #define UISURFARGB(vname) \
-        UISURFCMD(vname, "iN$", (int *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = *val!=0; \
-            else if(*numargs < 0) intret(o->vname ? 1 : 0); \
-            else printvar(id, o->vname ? 1 : 0); \
-        });
-
-    #define UISURFARGK(vname, valtype, type, cmin, cmax, valdef) \
-        UISURFCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp((valdef), cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UISURFARGSCALED(vname, valtype, type, cmin, cmax) \
-        UISURFCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax) * uiscale); \
-            else if(*numargs < 0) type##ret(o->vname * uiscale); \
-            else print##type##var(id, o->vname * uiscale); \
-        });
-
-    #define UISURFARG(vname, valtype, type, cmin, cmax) \
-        UISURFCMD(vname, valtype "N$", (type *val, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = type(clamp(*val, cmin, cmax)); \
-            else if(*numargs < 0) type##ret(o->vname); \
-            else print##type##var(id, o->vname); \
-        });
-
-    #define UISURFARGV(vname) \
-        UISURFCMD(vname, "fffN$", (float *x, float *y, float *z, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname = vec(*x, *y, *z); \
-            else \
-            { \
-                if(*numargs < 0) result(o->vname); \
-                else printsvar(id, o->vname); \
-            } \
-        }); \
-        UISURFCMD(vname##x, "fN$", (float *v, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname.x = *v; \
-            else if(*numargs < 0) floatret(o->vname.x); \
-            else printfvar(id, o->vname.x); \
-        }); \
-        UISURFCMD(vname##y, "fN$", (float *v, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname.y = *v; \
-            else if(*numargs < 0) floatret(o->vname.y); \
-            else printfvar(id, o->vname.y); \
-        }); \
-        UISURFCMD(vname##z, "fN$", (float *v, int *numargs, ident *id), { \
-            if(*numargs > 0) o->vname.z = *v; \
-            else if(*numargs < 0) floatret(o->vname.z); \
-            else printfvar(id, o->vname.z); \
-        });
-
-    UISURFARGB(lockcursor);
-    UISURFARGB(lockscroll);
-    UISURFARG(cursortype, "i", int, 0, int(CURSOR_MAX)-1);
-    ICOMMANDV(0, uisurfacetype, surfacetype);
-    ICOMMANDV(0, uisurfaceformat, surfaceformat);
-    ICOMMANDV(0, uisurfaceinput, surfaceinput);
-
-    ICOMMAND(0, uimousetrackx, "", (), {
-        if(surface)
-        {
-            surface->mousetracking = true;
-            floatret(surface->mousetrackvec.x);
-        }
-    });
-    ICOMMAND(0, uimousetracky, "", (), {
-        if(surface)
-        {
-            surface->mousetracking = true;
-            floatret(surface->mousetrackvec.y);
-        }
-    });
-
-    bool pushsurface(int surf)
-    {
-        if(surf < 0 || surf >= SURFACE_MAX || !surfaces[surf]) return false;
-        surfacestack.add(surface);
-        surface = surfaces[surf];
-        surfacetype = surface->type;
-        surfacehint2d = &surface->hintoffset2d;
-        surfacehint3d = &surface->hintoffset3d;
-        return true;
-    }
-
-    void popsurface()
-    {
-        surface = surfacestack.empty() ? NULL : surfacestack.pop();
-        surfacetype = surface ? surface->type : -1;
-        surfacehint2d = surface ? &surface->hintoffset2d : NULL;
-        surfacehint3d = surface ? &surface->hintoffset3d : NULL;
-    }
-
-    #define DOSURFACE(surf, body) \
-    { \
-        if(pushsurface(surf))\
-        { \
-            body; \
-            popsurface(); \
-        } \
-    }
-
-    #define SWSURFACE(surf, body) \
-    { \
-        if(surf >= 0) DOSURFACE(surf, body) \
-        else loopk(SURFACE_MAX) if(surfaces[k]) DOSURFACE(k, body) \
-    }
+    static World *world = NULL;
 
     void Window::build()
     {
-        if(!surface) return;
-        reset(surface);
+        reset(world);
         setup();
-
-        Window *oldwindow = window;
         window = this;
-        setargs();
-        buildlevel = taglevel = -1;
-        if(contents) buildchildren(contents->code, mapdef);
-        window = oldwindow;
+        buildchildren(contents);
+        window = NULL;
     }
 
-    bool newui(const char *name, int stype, const char *contents, const char *onshow, const char *onhide, const char *vistest, const char *forcetest, bool mapdef = false, const char *dyn = NULL, tagval *args = NULL, int numargs = 0)
+    ICOMMAND(0, newui, "ssssi", (char *name, char *contents, char *onshow, char *onhide, int *windowflags),
     {
-        if(!name || !*name || !contents || !*contents || stype < 0 || stype >= SURFACE_MAX) return false;
+        Window *window = windows.find(name, NULL);
+        if(window) { if(window == UI::window) return; world->hide(window); windows.remove(name); delete window; }
+        windows[name] = new Window(name, contents, onshow, onhide, *windowflags);
+    });
 
-        if(mapdef && !(identflags&IDF_MAP) && !editmode)
-        {
-            conoutf(colourred, "Map %s UI %s is only directly modifiable in editmode", SURFACE_STR[stype], name);
-            return false;
-        }
+    ICOMMAND(0, uiallowinput, "b", (int *val), { if(window) { if(*val >= 0) window->allowinput = *val!=0; intret(window->allowinput ? 1 : 0); } });
+    ICOMMAND(0, uiexclusive, "b", (int *val), { if(window) { if(*val >= 0) window->exclusive = *val!=0; intret(window->exclusive ? 1 : 0); } });
+    ICOMMAND(0, uiwindowflags, "b", (int *val), { if(window) { if(*val >= 0) window->windowflags = clamp(*val, 0, int(WINDOW_ALL)); intret(window->windowflags); } });
 
-        if(!pushsurface(stype))
-        {
-            conoutf(colourred, "Cannot create %s on Surface %s", name, SURFACE_STR[stype]);
-            return false;
-        }
+    ICOMMAND(0, uioverridepos, "", (), { if(window) { intret(window->overridepos ? 1 : 0); } });
+    ICOMMAND(0, uisetpos, "ff", (float *xpos, float *ypos), { if(window) { window->setpos(*xpos, *ypos); } });
+    ICOMMAND(0, uiresetpos, "", (), { if(window) { window->resetpos(); } });
 
-        Window *w = surface->windows.find(name, NULL);
-        if(w)
-        {
-            if(w == window)
-            {
-                conoutf(colourred, "Cannot redefine %s UI %s while it is currently active", SURFACE_STR[stype], w->name);
-                popsurface();
-                return false;
-            }
+    ICOMMAND(0, uicursorx, "", (), floatret(cursorx*float(hudw)/hudh));
+    ICOMMAND(0, uicursory, "", (), floatret(cursory));
 
-            if(!w->mapdef && mapdef)
-            {
-                conoutf(colourred, "Cannot override builtin %s UI %s with a one from the map", SURFACE_STR[stype], w->name);
-                popsurface();
-                return false;
-            }
+    ICOMMAND(0, uiaspect, "", (), floatret(float(hudw)/hudh));
 
-            surface->hide(w);
-            surface->windows.remove(name);
-            delete w;
-            loopv(surface->texs)
-            {
-                Texture *t = surface->texs[i];
-                if(strcmp(name, t->comp)) continue;
-                t->rendered = 0; // redraw
-            }
-        }
+    ICOMMAND(0, uicursortype, "b", (int *val), { if(*val >= 0) cursortype = clamp(*val, 0, CURSOR_MAX-1); intret(cursortype); });
 
-        surface->windows[name] = new Window(name, contents, onshow, onhide, vistest, forcetest, mapdef, dyn, args, numargs);
-        popsurface();
-
-        return true;
+    bool showui(const char *name)
+    {
+        Window *window = windows.find(name, NULL);
+        if(!window) return false;
+        return world->show(window);
     }
 
-    ICOMMAND(0, newui, "sisssss", (char *name, int *stype, char *contents, char *onshow, char *onhide, char *vistest, char *forcetest), if(!(identflags&IDF_MAP)) newui(name, *stype, contents, onshow, onhide, vistest, forcetest, false));
-    ICOMMAND(0, mapui, "sisssss", (char *name, int *stype, char *contents, char *onshow, char *onhide, char *vistest, char *forcetest), newui(name, *stype, contents, onshow, onhide, vistest, forcetest, true));
-
-    void closedynui(const char *name, int stype, bool mapdef)
+    bool hideui(const char *name)
     {
-        SWSURFACE(stype, enumerate(surface->windows, Window *, w,
+        if(!name) return world->hideall() > 0;
+        else
         {
-            if(!w->dyn || !*w->dyn || w->mapdef != mapdef || (name && *name && strcmp(w->dyn, name))) continue;
-            surface->hide(w);
-        }));
-    }
-
-    ICOMMAND(0, closedynui, "si", (char *name, int *stype), closedynui(name, *stype, false));
-
-    void cleardynui(const char *name, int stype, bool mapdef)
-    {
-        SWSURFACE(stype, enumerate(surface->windows, Window *, w,
-        {
-            if(!w->dyn || !*w->dyn || w->mapdef != mapdef || (name && *name && strcmp(w->dyn, name))) continue;
-            surface->hide(w);
-            surface->windows.remove(w->name);
-            delete w;
-        }));
-    }
-
-    ICOMMAND(0, cleardynui, "sb", (char *name, int *stype), cleardynui(name, *stype, false));
-    ICOMMAND(0, clearmapdynui, "sb", (char *name, int *stype), cleardynui(name, *stype, true));
-
-    struct DynUI
-    {
-        char *name, *contents, *onshow, *onhide, *vistest, *forcetest;
-        bool mapdef;
-
-        DynUI(const char *s) : name(newstring(s)), contents(NULL), onshow(NULL), onhide(NULL), vistest(NULL), forcetest(NULL), mapdef(false) {}
-        ~DynUI()
-        {
-            DELETEA(name);
-            cleanup();
+            Window *window = windows.find(name, NULL);
+            if(window) return world->hide(window);
         }
-
-        void cleanup()
-        {
-            DELETEA(contents);
-            DELETEA(onshow);
-            DELETEA(onhide);
-            DELETEA(vistest);
-            DELETEA(forcetest);
-        }
-    };
-    vector<DynUI *> dynuis;
-
-    DynUI *finddynui(const char *name)
-    {
-        if(!name || !*name) return NULL;
-        loopv(dynuis) if(!strcmp(dynuis[i]->name, name)) return dynuis[i];
-        return NULL;
-    }
-
-    struct DynUIRef
-    {
-        char *name;
-        int param;
-        string ref;
-
-        DynUIRef(const char *s, int n) : name(newstring(s)), param(n)
-        {
-            formatstring(ref, "%s_%d", name, param);
-        }
-
-        ~DynUIRef()
-        {
-            DELETEA(name);
-        }
-
-        bool match(const char *s, int n) { return !strcmp(name, s) && param == n; }
-    };
-    vector<DynUIRef *> dynuirefs;
-
-    DynUIRef *finddynuiref(const char *name, int param = -1)
-    {
-        if(!name || !*name || param < 0) return NULL; // not dynui
-        loopv(dynuirefs) if(dynuirefs[i]->match(name, param)) return dynuirefs[i];
-        return NULL;
-    }
-
-    const char *dynuiref(const char *name, int param = -1, bool create = false)
-    {
-        if(!name || !*name || param < 0) return name; // not dynui
-
-        DynUIRef *d = finddynuiref(name, param);
-        if(!d)
-        {
-            if(!create) return NULL;
-            d = new DynUIRef(name, param);
-            dynuirefs.add(d);
-        }
-
-        return d ? d->ref : NULL;
-    }
-
-    Window *dynuirefwin(const char *name, int param = -1, bool create = false)
-    {
-        if(!name || !*name) return NULL;
-        const char *ref = dynuiref(name, param, create);
-        return ref && *ref ? surface->windows.find(ref, NULL) : NULL;
-    }
-
-    void dynui(const char *name, const char *contents, const char *onshow, const char *onhide, const char *vistest, const char *forcetest, bool mapdef)
-    {
-        if(!name || !*name || !contents || !*contents) return;
-
-        DynUI *m = NULL;
-        loopv(dynuis) if(!strcmp(dynuis[i]->name, name))
-        {
-            m = dynuis[i];
-            break;
-        }
-
-        if(m && !m->mapdef && mapdef)
-        {
-            conoutf(colourred, "Cannot override builtin DynUI %s with one from the map", name);
-            return;
-        }
-        if(mapdef && !(identflags&IDF_MAP) && !editmode)
-        {
-            conoutf(colourred, "Map DynUI %s is only directly modifiable in editmode", name);
-            return;
-        }
-
-        if(!m) dynuis.add(m = new DynUI(name));
-        else m->cleanup();
-
-        m->contents = newstring(contents);
-        m->onshow = onshow && *onshow ? newstring(onshow) : NULL;
-        m->onhide = onhide && *onhide ? newstring(onhide) : NULL;
-        m->vistest = vistest && *vistest ? newstring(vistest) : NULL;
-        m->forcetest = forcetest && *forcetest ? newstring(forcetest) : NULL;
-        m->mapdef = mapdef;
-    }
-
-    ICOMMAND(0, dynui, "ssssss", (char *name, char *contents, char *onshow, char *onhide, char *vistest, char *forcetest), dynui(name, contents, onshow, onhide, vistest, forcetest, (identflags&IDF_MAP) != 0));
-    ICOMMAND(0, mapdynui, "ssssss", (char *name, char *contents, char *onshow, char *onhide, char *vistest, char *forcetest), dynui(name, contents, onshow, onhide, vistest, forcetest, true));
-
-    const char *dynuiexec(const char *name, int param)
-    {
-        if(!name || !*name || param < 0) return NULL;
-
-        DynUI *d = finddynui(name);
-        if(d)
-        {
-            tagval t; t.setint(param);
-            const char *refname = dynuiref(name, param, true); // should be the only one creating refs
-            if(newui(refname, surfacetype, d->contents, d->onshow, d->onhide, d->vistest, d->forcetest, d->mapdef, d->name, &t, 1))
-                return refname;
-        }
-
-        return NULL;
-    }
-
-    Window *dynuicreate(const char *name, int param)
-    {
-        if(!name || !*name || param < 0) return NULL;
-
-        const char *refname = dynuiexec(name, param);
-        if(refname) return surface->windows.find(refname, NULL);
-
-        return NULL;
-    }
-
-    bool windowvisible(Window *w)
-    {
-        #if 0
-        if(!w->vistest) return true;
-        w->setargs();
-        return executebool(w->vistest->code);
-        #else
-        return true;
-        #endif
-    }
-
-    bool showui(const char *name, int stype, int param, const vec &origin, float maxdist, float yaw, float pitch, float scale, float detentyaw, float detentpitch)
-    {
-        if(!pushsurface(stype)) return false;
-
-        Window *w = dynuirefwin(name, param);
-        if(!w) w = dynuicreate(name, param);
-
-        bool ret = w && windowvisible(w) && surface->show(w, origin, maxdist, yaw, pitch, scale, detentyaw, detentpitch);
-
-        popsurface();
-
-        return ret;
-    }
-
-    // poke UI's don't display unless they are poked every frame
-    bool pokeui(const char *name, int stype, int param, const vec &origin, float maxdist, float yaw, float pitch, float scale, float detentyaw, float detentpitch)
-    {
-        if(!engineready || !pushsurface(stype)) return false;
-
-        Window *w = dynuirefwin(name, param);
-
-        if(w && surface->children.find(w) >= 0)
-        {
-            if(!windowvisible(w))
-            {
-                surface->hide(w);
-                return false;
-            }
-
-            w->origin = origin;
-            w->maxdist = maxdist;
-            w->yaw = yaw;
-            w->pitch = pitch;
-            w->scale = scale;
-            w->detentyaw = detentyaw;
-            w->detentpitch = detentpitch;
-            w->lastpoke = uitotalmillis;
-
-            popsurface();
-            return true;
-        }
-
-        if(!w) w = dynuicreate(name, param);
-
-        bool ret = false;
-        if(w && windowvisible(w) && surface->show(w, origin, maxdist, yaw, pitch, scale, detentyaw, detentpitch))
-        {
-            w->lastpoke = uitotalmillis;
-            ret = true;
-        }
-
-        popsurface();
-
-        return ret;
-    }
-
-    bool hideui(const char *name, int stype, int param)
-    {
-        if(!pushsurface(stype)) return false;
-
-        if(!name || !*name)
-        {
-            bool ret = surface->hideall(false) > 0;
-            popsurface();
-            return ret;
-        }
-
-        Window *w = dynuirefwin(name, param);
-        bool ret = w && surface->hide(w);
-
-        popsurface();
-
-        return ret;
-    }
-
-    bool toggleui(const char *name, int stype, int param, const vec &origin, float maxdist, float yaw, float pitch, float scale, float detentyaw, float detentpitch)
-    {
-        if(showui(name, stype, param, origin, maxdist, yaw, pitch, scale, detentyaw, detentpitch)) return true;
-        hideui(name, stype, param);
         return false;
     }
 
-    int openui(const char *name, int stype)
+    bool toggleui(const char *name)
     {
-        if(uitest(name, stype) || !pushsurface(stype)) return 0;
-
-        defformatstring(cmd, "%s \"%s\" %d", uiopencmd, name ? name : "",  stype);
-        int ret = execute(cmd);
-
-        popsurface();
-
-        return ret;
+        if(showui(name)) return true;
+        hideui(name);
+        return false;
     }
 
-    int closeui(const char *name, int stype)
+    int openui(const char *name)
     {
-        if(!uitest(name, stype) || !pushsurface(stype)) return 0;
-
-        defformatstring(cmd, "%s \"%s\" %d", uiclosecmd, name ? name : "", stype);
-        int ret = execute(cmd);
-
-        popsurface();
-
-        return ret;
+        defformatstring(cmd, "%s \"%s\"", uiopencmd, name ? name : "");
+        return execute(cmd);
     }
 
-    void hideall()
+    int closeui(const char *name)
     {
-        loopi(SURFACE_MAX) hideui(NULL, i);
+        defformatstring(cmd, "%s \"%s\"", uiclosecmd, name ? name : "");
+        return execute(cmd);
     }
 
-    void holdui(const char *name, bool on, int stype, int param, const vec &origin, float maxdist, float yaw, float pitch, float scale, float detentyaw, float detentpitch)
+    void holdui(const char *name, bool on)
     {
-        if(on) showui(name, stype, param, origin, maxdist, yaw, pitch, scale, detentyaw, detentpitch);
-        else hideui(name, stype, param);
+        if(on) showui(name);
+        else hideui(name);
     }
 
-    void pressui(const char *name, bool on, int stype, int param, const vec &origin, float maxdist, float yaw, float pitch, float scale, float detentyaw, float detentpitch)
+    void pressui(const char *name, bool on)
     {
-        if(on) { if(!uitest(name, stype, param)) showui(name, stype, param, origin, maxdist, yaw, pitch, scale, detentyaw, detentpitch); }
-        else if(uitest(name, stype, param)) hideui(name, stype, param);
+        if(on) { if(!uivisible(name)) openui(name); }
+        else if(uivisible(name)) closeui(name);
     }
 
-    bool uitest(const char *name, int stype, int param)
+    bool uivisible(const char *name)
     {
-        if(!pushsurface(stype)) return false;
-
-        if(!name || !*name)
-        {
-            bool ret = surface->children.length() > 0;
-            popsurface();
-            return ret;
-        }
-
-        Window *w = dynuirefwin(name, param);
-        bool ret = w && surface->children.find(w) >= 0;
-
-        popsurface();
-
-        return ret;
+        if(!name) return world->children.length() > 0;
+        Window *window = windows.find(name, NULL);
+        return window && !window->closing && world->children.find(window) >= 0;
     }
 
-    ICOMMAND(IDF_NOECHO, showui, "sbbgggfgffff", (char *name, int *sf, int *param, float *x, float *y, float *z, float *maxdist, float *yaw, float *pitch, float *scale, float *detentyaw, float *detentpitch), intret(showui(name, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param, vec(*x, *y, *z), *maxdist, *yaw, *pitch, *scale, *detentyaw, *detentpitch) ? 1 : 0));
-    ICOMMAND(IDF_NOECHO, pokeui, "sbbgggfgffff", (char *name, int *sf, int *param, float *x, float *y, float *z, float *maxdist, float *yaw, float *pitch, float *scale, float *detentyaw, float *detentpitch), intret(pokeui(name, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param, vec(*x, *y, *z), *maxdist, *yaw, *pitch, *scale, *detentyaw, *detentpitch) ? 1 : 0));
-    ICOMMAND(IDF_NOECHO, hideui, "sbb", (char *name, int *sf, int *param), intret(hideui(name, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param) ? 1 : 0));
-    ICOMMAND(IDF_NOECHO, toggleui, "sbbgggfgffff", (char *name, int *sf, int *param, float *x, float *y, float *z, float *maxdist, float *yaw, float *pitch, float *scale, float *detentyaw, float *detentpitch), intret(toggleui(name, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param, vec(*x, *y, *z), *maxdist, *yaw, *pitch, *scale, *detentyaw, *detentpitch) ? 1 : 0));
-    ICOMMAND(IDF_NOECHO, holdui, "sbbgggfgffffD", (char *name, int *sf, int *param, float *x, float *y, float *z, float *maxdist, float *yaw, float *pitch, float *scale, float *detentyaw, float *detentpitch, int *down), holdui(name, *down!=0, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param, vec(*x, *y, *z), *maxdist, *yaw, *pitch, *scale, *detentyaw, *detentpitch));
-    ICOMMAND(IDF_NOECHO, pressui, "sbbgggfgffffD", (char *name, int *sf, int *param, float *x, float *y, float *z, float *maxdist, float *yaw, float *pitch, float *scale, float *detentyaw, float *detentpitch, int *down), pressui(name, *down!=0, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param, vec(*x, *y, *z), *maxdist, *yaw, *pitch, *scale, *detentyaw, *detentpitch));
-    ICOMMAND(IDF_NOECHO, uitest, "sbb", (char *name, int *sf, int *param), intret(uitest(name, *sf >= 0 && *sf < SURFACE_MAX ? *sf : int(SURFACE_FOREGROUND), *param) ? 1 : 0));
+    bool uiclosing(const char *name)
+    {
+        if(!name) return false;
+        Window *window = windows.find(name, NULL);
+        return window && window->closing;
+    }
 
-    #define SURFACEOP(idx)  Surface *s = (idx) >= 0 && (idx) < SURFACE_MAX ? surfaces[(idx)] : (surface ? surface : surfaces[SURFACE_FOREGROUND]);
+    void uisetclose(const char *name, bool closing)
+    {
+        if(!name) return;
+        Window *window = windows.find(name, NULL);
+        if(!window) return;
+        window->closing = closing;
+    }
 
-    ICOMMAND(IDF_NOECHO, hidetopui, "b", (int *sf), SURFACEOP(*sf); intret(s && s->hidetop() ? 1 : 0));
-    ICOMMAND(IDF_NOECHO, hideallui, "bii", (int *sf, int *n), SURFACEOP(*sf); intret(s ? s->hideall(*n != 0) : 0));
-    ICOMMAND(IDF_NOECHO, uitopwindow, "b", (int *sf), SURFACEOP(*sf); result(s ? s->topname() : ""));
-    ICOMMANDVS(0, uitopname, surface ? surface->topname() : (surfaces[SURFACE_FOREGROUND] ? surfaces[SURFACE_FOREGROUND]->topname() : ""));
-
-    ICOMMANDVS(0, uiname, window ? window->name : "")
+    ICOMMAND(0, showui, "s", (char *name), intret(showui(name) ? 1 : 0));
+    ICOMMAND(0, hideui, "s", (char *name), intret(hideui(name) ? 1 : 0));
+    ICOMMAND(0, hidetopui, "", (), intret(world->hidetop() ? 1 : 0));
+    ICOMMAND(0, topui, "", (), result(world->topname()));
+    ICOMMAND(0, hideallui, "", (), intret(world->hideall()));
+    ICOMMAND(0, toggleui, "s", (char *name), intret(toggleui(name) ? 1 : 0));
+    ICOMMAND(0, holdui, "sD", (char *name, int *down), holdui(name, *down!=0));
+    ICOMMAND(0, pressui, "sD", (char *name, int *down), pressui(name, *down!=0));
+    ICOMMAND(0, uivisible, "s", (char *name), intret(uivisible(name) ? 1 : 0));
+    ICOMMAND(0, uiname, "", (), { if(window) result(window->name); });
+    ICOMMAND(0, uiclosing, "s", (char *name), intret(uiclosing(name) ? 1 : 0));
+    ICOMMAND(0, uisetclose, "si", (char *name, int *n), uisetclose(name, *n != 0));
 
     struct HorizontalList : Object
     {
@@ -2634,7 +1231,7 @@ namespace UI
             if(children.empty()) return;
 
             float offset = 0, sx = 0, cspace = (w - subw) / max(children.length() - 1, 1), cstep = (w - subw) / children.length();
-            loopv(children)
+            for(int i = 0; i < children.length(); i++)
             {
                 Object *o = children[i];
                 o->x = offset;
@@ -2802,30 +1399,23 @@ namespace UI
         static const char *typestr() { return "#TableHeader"; }
         const char *gettype() const { return typestr(); }
 
-        uchar childalign() const { return columns < 0 ? ALIGN_VCENTER : ALIGN_DEFAULT; }
+        uchar childalign() const { return columns < 0 ? ALIGN_VCENTER : ALIGN_HCENTER | ALIGN_VCENTER; }
 
         int childcolumns() const { return columns; }
 
         void buildchildren(uint *columndata, uint *contents)
         {
             Object *oldparent = buildparent;
+            int oldchild = buildchild;
             buildparent = this;
             buildchild = 0;
-
-            const char *oldttag = curtag;
-            if(buildlevel != taglevel) curtag = NULL;
-            buildlevel++;
-
             executeret(columndata);
             if(columns != buildchild) while(children.length() > buildchild) delete children.pop();
             columns = buildchild;
             if((*contents&CODE_OP_MASK) != CODE_EXIT) executeret(contents);
             while(children.length() > buildchild) delete children.pop();
-
-            curtag = oldttag;
-            buildlevel--;
-
             buildparent = oldparent;
+            buildchild = oldchild;
             resetstate();
         }
 
@@ -2836,8 +1426,6 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            drawn = true;
-
             loopchildrange(columns, children.length(), o,
             {
                 if(!isfullyclipped(sx + o->x, sy + o->y, o->w, o->h))
@@ -2854,11 +1442,8 @@ namespace UI
         if(buildparent) \
         { \
             type *o = buildparent->buildtype<type>(); \
-            if(o) \
-            { \
-                setup; \
-                o->buildchildren(columndata, contents); \
-            } \
+            setup; \
+            o->buildchildren(columndata, contents); \
         } \
     } while(0)
 
@@ -2882,18 +1467,16 @@ namespace UI
     struct Table : Object
     {
         float spacew, spaceh, subw, subh;
-        int column;
         vector<float> widths;
 
         static const char *typestr() { return "#Table"; }
         const char *gettype() const { return typestr(); }
 
-        void setup(float spacew_ = 0, float spaceh_ = 0, int column_ = 0)
+        void setup(float spacew_ = 0, float spaceh_ = 0)
         {
             Object::setup();
             spacew = spacew_;
             spaceh = spaceh_;
-            column = column_;
         }
 
         uchar childalign() const { return 0; }
@@ -2918,33 +1501,9 @@ namespace UI
             });
 
             subw = 0;
-            if(column > 0)
-            {
-                float wadjust = spacew * max(widths.length() - 1, 0) / max(widths.length(), 1);
-                loopv(widths)
-                {
-                    widths[i] += wadjust;
-                    subw += widths[i];
-                }
-                w = max(w, subw);
-            }
-            else
-            {
-                loopv(widths) subw += widths[i];
-                w = max(w, subw + spacew * max(widths.length() - 1, 0));
-            }
-            h = subh + spaceh * max(children.length() - 1, 0);
-        }
-
-        void adjustrow(Object *o, float &offsety, float &sy, float rspace, float rstep)
-        {
-            o->x = 0;
-            o->y = offsety;
-            o->w = w;
-            offsety += o->h + rspace;
-            float sh = o->h + rstep;
-            o->adjustlayout(0, sy, w, sh);
-            sy += sh;
+            loopv(widths) subw += widths[i];
+            w = max(w, subw + spacew*max(widths.length() - 1, 0));
+            h = subh + spaceh*max(children.length() - 1, 0);
         }
 
         void adjustchildren()
@@ -2952,12 +1511,10 @@ namespace UI
             if(children.empty()) return;
 
             float offsety = 0, sy = 0,
+                  cspace = (w - subw) / max(widths.length() - 1, 1),
+                  cstep = (w - subw) / widths.length(),
                   rspace = (h - subh) / max(children.length() - 1, 1),
-                  rstep = (h - subh) / children.length(),
-                  cspace = column > 0 ? 0.f : (w - subw) / max(widths.length() - 1, 1),
-                  cstep = column > 0 ? 0.f : (w - subw) / widths.length(),
-                  cwidth = w - subw;
-
+                  rstep = (h - subh) / children.length();
             loopchildren(o,
             {
                 o->x = 0;
@@ -2974,18 +1531,10 @@ namespace UI
                 loopj(cols)
                 {
                     Object *c = o->children[j];
-
                     c->x = offsetx;
-                    offsetx += widths[j];
-                    if(column <= 0) offsetx += cspace;
-
-                    float sw = widths[j];
-                    if(column > 0)
-                        sw += j + 1 == column ? cwidth : 0.f;
-                    else sw += cstep;
-
+                    offsetx += widths[j] + cspace;
+                    float sw = widths[j] + cstep;
                     c->adjustlayout(sx, 0, sw, o->h);
-
                     sx += sw;
                 }
             });
@@ -2997,7 +1546,6 @@ namespace UI
 
     UIARGSCALED(Table, table, spacew, "f", float, 0.f, FVAR_MAX);
     UIARGSCALED(Table, table, spaceh, "f", float, 0.f, FVAR_MAX);
-    UIARG(Table, table, column, "i", int, 0, VAR_MAX);
 
     struct Padder : Object
     {
@@ -3090,104 +1638,52 @@ namespace UI
 
     struct Color
     {
-        bvec4 val;
-
-        Color() { val.mask = 0xFFFFFFFFU; }
-        Color(int c, bool force = false) { fillvalue(c, force); }
-        Color(uint c, bool force = false) { fillvalue(c, force); }
-        Color(uint c, uchar a) { fillvalue(c, a); }
-        Color(uchar r, uchar g, uchar b, uchar a = 255) : val(r, g, b, a) {}
-        Color(const Color &c) : val(c.val) {}
-
-        void fillvalue(int c, bool force = false)
+        union
         {
-            val.r = (uint(c)>>16)&0xFF;
-            val.g = (uint(c)>>8)&0xFF;
-            val.b = uint(c)&0xFF;
-            val.a = uint(c)>>24 || force ? uint(c)>>24 : 0xFF;
-        }
+            struct { uchar r, g, b, a; };
+            uint mask;
+        };
 
-        void fillvalue(uint c, bool force = false)
-        {
-            val.r = (c>>16)&0xFF;
-            val.g = (c>>8)&0xFF;
-            val.b = c&0xFF;
-            val.a = c>>24 || force ? uint(c)>>24 : 0xFF;
-        }
+        Color() : mask(0xFFFFFFFFU) {}
+        Color(uint c) : r((c>>16)&0xFF), g((c>>8)&0xFF), b(c&0xFF), a(c>>24 ? c>>24 : 0xFF) {}
+        Color(uint c, uchar a) : r((c>>16)&0xFF), g((c>>8)&0xFF), b(c&0xFF), a(a) {}
+        Color(uchar r, uchar g, uchar b, uchar a = 255) : r(r), g(g), b(b), a(a) {}
+        Color(const Color &c) : r(c.r), g(c.g), b(c.b), a(c.a) {}
 
-        void fillvalue(uint c, uchar a)
-        {
-            val.r = (c>>16)&0xFF;
-            val.g = (c>>8)&0xFF;
-            val.b = c&0xFF;
-            val.a = a;
-        }
-
-        void init(float scale = 1, float alpha = 1) { gle::colorub(val.r*scale, val.g*scale, val.b*scale, val.a*alpha); }
-        void attrib(float scale = 1, float alpha = 1) { gle::attribub(val.r*scale, val.g*scale, val.b*scale, val.a*alpha); }
-        void init(const Color &c) { gle::colorub(val.r*c.val.r, val.g*c.val.g, val.b*c.val.b, val.a*c.val.a); }
-        void attrib(const Color &c) { gle::attribub(val.r*c.val.r, val.g*c.val.g, val.b*c.val.b, val.a*c.val.a); }
+        void init() { gle::colorub(r, g, b, a); }
+        void attrib() { gle::attribub(r, g, b, a); }
 
         static void def() { gle::defcolor(4, GL_UNSIGNED_BYTE); }
 
-        Color &scale(const Color &c)
-        {
-            val.scale(c.val);
-            return *this;
-        }
+        vec tocolor() const { return vec(r*(1.0f/255.0f), g*(1.0f/255.0f), b*(1.0f/255.0f)); }
+        int tohexcolor() const { return (int(r)<<16)|(int(g)<<8)|int(b); }
 
-        Color &combine(const Color &c)
-        {
-            val.combine(c.val);
-            return *this;
-        }
+        vec4 tocolor4() const { return vec4(r*(1.0f/255.0f), g*(1.0f/255.0f), b*(1.0f/255.0f), a*(1.0f/255.0f)); }
+        int tohexcolor4() const { return (int(a)<<24)|(int(r)<<16)|(int(g)<<8)|int(b); }
 
-        bool operator==(const Color &o) const { return val.mask == o.val.mask; }
-        bool operator!=(const Color &o) const { return val.mask != o.val.mask; }
+        bool operator==(const Color &o) const { return mask == o.mask; }
+        bool operator!=(const Color &o) const { return mask != o.mask; }
     };
 
     struct Colored : Object
     {
-        enum { SOLID = 0, MODULATE, OUTLINED, OVERWRITE, BUFFER, GLOW };
+        enum { SOLID = 0, MODULATE, OUTLINED };
         enum { VERTICAL, HORIZONTAL };
 
-        int type, dir, sep;
+        int type, dir;
         vector<Color> colors;
 
         static const char *typestr() { return "#Colored"; }
         const char *gettype() const { return typestr(); }
         bool iscolour() const { return true; }
 
-        void setupdraw(int drawflags = 0)
-        {
-            int outtype = -1;
-            bool outsep = sep >= 0 ? sep != 0 : blendsepdef;
-            switch(type)
-            {
-                case SOLID: outtype = BLEND_ALPHA; break;
-                case MODULATE: outtype = BLEND_MOD; break;
-                case OVERWRITE: outtype = BLEND_SRC; break;
-                case BUFFER: outtype = BLEND_BUFFER; break;
-                case GLOW: outtype = BLEND_GLOW; break;
-                default: outtype = blendtypedef; break;
-            }
-
-            bool wantblend = outtype != blendtype || outsep != blendsep;
-            if(wantblend) drawflags |= CHANGE_BLEND;
-            drawflags |= CHANGE_COLOR;
-
-            changedraw(drawflags);
-            if(wantblend) setblend(outtype, outsep);
-        }
-
-        void setup(const Color &color_, int type_ = -1, int dir_ = -1, int sep_ = -1)
+        void setup(const Color &color_, int type_ = SOLID, int dir_ = VERTICAL)
         {
             Object::setup();
             colors.setsize(0);
             colors.add(color_);
-            type = type_ >= 0 ? type_ : -1;
-            dir = dir_ >= 0 ? dir_ : VERTICAL;
-            sep = sep_;
+            type = type_;
+            dir = dir_;
         }
 
         void rotatecolors(float amt, int colstart = 0, int colcount = 0)
@@ -3215,10 +1711,10 @@ namespace UI
             {
                 int p = rev ? i-pieces : (i+pieces)%cols, m = p >= 0 ? p : cols+p, q = rev ? m-1 : (m+1)%cols, n = q >= 0 ? q : cols+q;
                 colorstack.insert(index,
-                    Color(colors[m].val.r-int((colors[m].val.r-colors[n].val.r)*iter),
-                          colors[m].val.g-int((colors[m].val.g-colors[n].val.g)*iter),
-                          colors[m].val.b-int((colors[m].val.b-colors[n].val.b)*iter),
-                          colors[m].val.a-int((colors[m].val.a-colors[n].val.a)*iter)
+                    Color(colors[m].r-int((colors[m].r-colors[n].r)*iter),
+                          colors[m].g-int((colors[m].g-colors[n].g)*iter),
+                          colors[m].b-int((colors[m].b-colors[n].b)*iter),
+                          colors[m].a-int((colors[m].a-colors[n].a)*iter)
                          )
                     );
                 if(!rev) index++;
@@ -3227,36 +1723,24 @@ namespace UI
             loopv(colorstack) colors.add(colorstack[i]);
         }
     };
-
-    UIARGT(Colored, colour, type, "i", int, int(Colored::SOLID), int(Colored::OVERWRITE));
+    UIARGT(Colored, colour, type, "i", int, int(Colored::SOLID), int(Colored::OUTLINED));
     UIARGT(Colored, colour, dir, "i", int, int(Colored::VERTICAL), int(Colored::HORIZONTAL));
-    UIARGT(Colored, colour, sep, "i", int, -1, 1);
 
-    UICMDT(Colored, colour, set, "iii", (int *c, int *pos, int *force),
+    UICMDT(Colored, colour, set, "ii", (int *c, int *pos),
     {
-        if(o->colors.inrange(*pos)) o->colors[*pos] = Color(*c, *force != 0);
+        if(*pos >= 0 && *pos < o->colors.length()) o->colors[*pos] = Color(*c);
     });
-    UICMDT(Colored, colour, get, "i", (int *pos), intret(o->colors[clamp(*pos, 0, o->colors.length()-1)].val.mask));
-    UICMDT(Colored, colour, add, "ii", (int *c, int *force), o->colors.add(Color(*c, *force != 0)));
+    UICMDT(Colored, colour, get, "i", (int *pos), intret(o->colors[clamp(*pos, 0, o->colors.length()-1)].mask));
+    UICMDT(Colored, colour, add, "i", (int *c), o->colors.add(Color(*c)));
     UICMDT(Colored, colour, del, "i", (int *c),
     {
         loopvrev(o->colors) if(o->colors[i] == Color(*c)) o->colors.remove(i);
         if(o->colors.empty()) o->colors.add(Color(colourwhite));
     });
-    UICMDT(Colored, colour, scale, "ibi", (int *c, int *pos, int *force),
-    {
-        if(*pos < 0) loopv(o->colors) o->colors[i].scale(Color(*c, *force != 0));
-        else if(o->colors.inrange(*pos)) o->colors[*pos].scale(Color(*c, *force != 0));
-    });
-    UICMDT(Colored, colour, combine, "ibi", (int *c, int *pos, int *force),
-    {
-        if(*pos < 0) loopv(o->colors) o->colors[i].combine(Color(*c, *force != 0));
-        else if(o->colors.inrange(*pos)) o->colors[*pos].combine(Color(*c, *force != 0));
-    });
     UICMDT(Colored, colour, rotate, "fii", (float *amt, int *start, int *count), o->rotatecolors(*amt, *start, *count));
-    UICMDT(Colored, colour, blend, "f", (float *blend), loopvk(o->colors) o->colors[k].val.a = clamp(uchar(*blend * o->colors[k].val.a), 0, 255));
 
     static const float defcoords[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+
     struct Filler : Colored
     {
         enum { FC_TL = 0, FC_TR, FC_BR, FC_BL, FC_MAX };
@@ -3264,7 +1748,7 @@ namespace UI
         float minw, minh;
         vec2 coords[FC_MAX];
 
-        void setup(float minw_, float minh_, const Color &color_ = Color(colourwhite), int type_ = -1, int dir_ = -1)
+        void setup(float minw_, float minh_, const Color &color_ = Color(colourwhite), int type_ = SOLID, int dir_ = VERTICAL)
         {
             Colored::setup(color_, type_, dir_);
             minw = minw_;
@@ -3272,7 +1756,7 @@ namespace UI
             loopi(FC_MAX) loopj(2) coords[i][j] = defcoords[i][j];
         }
 
-        void setup(const Color &color_, int type_ = -1, int dir_ = -1)
+        void setup(const Color &color_, int type_ = SOLID, int dir_ = VERTICAL)
         {
             Colored::setup(color_, type_, dir_);
             minw = minh = 0;
@@ -3320,11 +1804,6 @@ namespace UI
 
     struct Target : Filler
     {
-        void setup(float minw_, float minh_, const Color &color_ = Color(colourwhite), int type_ = -1, int dir_ = -1)
-        {
-            Filler::setup(minw_, minh_, color_, type_, dir_);
-        }
-
         static const char *typestr() { return "#Target"; }
         const char *gettype() const { return typestr(); }
 
@@ -3339,7 +1818,7 @@ namespace UI
 
     struct FillColor : Target
     {
-        void setup(const Color &color_, float minw_ = 0, float minh_ = 0, int type_ = -1, int dir_ = -1)
+        void setup(const Color &color_, float minw_ = 0, float minh_ = 0, int type_ = SOLID, int dir_ = VERTICAL)
         {
             Target::setup(minw_, minh_, color_, type_, dir_);
         }
@@ -3356,13 +1835,14 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_SHADER | CHANGE_COLOR | CHANGE_BLEND);
+            if(type==MODULATE) modblend(); else resetblend();
 
             int cols = colors.length();
             gle::begin(GL_TRIANGLE_STRIP);
             if(cols >= 2)
             {
-                float vr = 1/float(cols-1), vcx1 = 0, vcx2 = 0, vcy1 = 0, vcy2 = 0,
+                float vr = 1/float(cols-1), vcx1 = 0, vcx2 = 0, vcy1 = 0, vcy2 = 0, ts = 0,
                       vw1 = w*(getcoord(FC_TR, 0)-getcoord(FC_TL, 0)), vx1 = w*getcoord(FC_TL, 0),
                       vw2 = w*(getcoord(FC_BR, 0)-getcoord(FC_BL, 0)), vx2 = w*getcoord(FC_BL, 0),
                       vdw1 = w*(getcoord(FC_BL, 0)-getcoord(FC_TL, 0)), vdw2 = w*(getcoord(FC_BR, 0)-getcoord(FC_TR, 0)),
@@ -3398,6 +1878,7 @@ namespace UI
                             break;
                         }
                     }
+                    ts += vr;
                 }
             }
             else
@@ -3414,14 +1895,14 @@ namespace UI
     };
 
     ICOMMAND(0, uicolour, "iffe", (int *c, float *minw, float *minh, uint *children),
-        BUILD(FillColor, o, o->setup(Color(*c), *minw*uiscale, *minh*uiscale), children));
+        BUILD(FillColor, o, o->setup(Color(*c), *minw*uiscale, *minh*uiscale, Colored::SOLID), children));
 
     ICOMMAND(0, uimodcolour, "iffe", (int *c, float *minw, float *minh, uint *children),
         BUILD(FillColor, o, o->setup(Color(*c), *minw*uiscale, *minh*uiscale, Colored::MODULATE), children));
 
     struct Gradient : FillColor
     {
-        void setup(const Color &color_, const Color &color2_, float minw_ = 0, float minh_ = 0, int type_ = -1, int dir_ = -1)
+        void setup(const Color &color_, const Color &color2_, float minw_ = 0, float minh_ = 0, int type_ = SOLID, int dir_ = VERTICAL)
         {
             FillColor::setup(color_, minw_, minh_, type_, dir_);
             colors.add(color2_);
@@ -3432,27 +1913,19 @@ namespace UI
     };
 
     ICOMMAND(0, uivgradient, "iiffe", (int *c, int *c2, float *minw, float *minh, uint *children),
-        BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale), children));
+        BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale, Gradient::SOLID, Gradient::VERTICAL), children));
 
     ICOMMAND(0, uimodvgradient, "iiffe", (int *c, int *c2, float *minw, float *minh, uint *children),
-        BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale, Gradient::MODULATE), children));
+        BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale, Gradient::MODULATE, Gradient::VERTICAL), children));
 
     ICOMMAND(0, uihgradient, "iiffe", (int *c, int *c2, float *minw, float *minh, uint *children),
-        BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale, -1, Gradient::HORIZONTAL), children));
+        BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale, Gradient::SOLID, Gradient::HORIZONTAL), children));
 
     ICOMMAND(0, uimodhgradient, "iiffe", (int *c, int *c2, float *minw, float *minh, uint *children),
         BUILD(Gradient, o, o->setup(Color(*c), Color(*c2), *minw*uiscale, *minh*uiscale, Gradient::MODULATE, Gradient::HORIZONTAL), children));
 
     struct Line : Target
     {
-        float width;
-
-        void setup(float minw_ = 0, float minh_ = 0, const Color &color_ = Color(colourwhite), float width_ = 1)
-        {
-            Target::setup(minw_, minh_, color_);
-            width = width_;
-        }
-
         static const char *typestr() { return "#Line"; }
         const char *gettype() const { return typestr(); }
 
@@ -3464,15 +1937,14 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_SHADER | CHANGE_COLOR | CHANGE_BLEND);
+            if(type==MODULATE) modblend(); else resetblend();
 
-            if(width != 1) glLineWidth(width);
             colors[0].init();
             gle::begin(GL_LINES);
             gle::attribf(sx,   sy);
             gle::attribf(sx+w, sy+h);
             gle::end();
-            if(width != 1) glLineWidth(1);
 
             Object::draw(sx, sy);
         }
@@ -3481,18 +1953,8 @@ namespace UI
     ICOMMAND(0, uiline, "iffe", (int *c, float *minw, float *minh, uint *children),
         BUILD(Line, o, o->setup(*minw*uiscale, *minh*uiscale, Color(*c)), children));
 
-    UIARG(Line, line, width, "f", float, FVAR_NONZERO, FVAR_MAX);
-
     struct Outline : Target
     {
-        float width;
-
-        void setup(float minw_ = 0, float minh_ = 0, const Color &color_ = Color(colourwhite), float width_ = 1)
-        {
-            Target::setup(minw_, minh_, color_);
-            width = width_;
-        }
-
         static const char *typestr() { return "#Outline"; }
         const char *gettype() const { return typestr(); }
 
@@ -3504,9 +1966,9 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_SHADER | CHANGE_COLOR | CHANGE_BLEND);
+            if(type==MODULATE) modblend(); else resetblend();
 
-            if(width != 1) glLineWidth(width);
             colors[0].init();
             gle::begin(GL_LINE_LOOP);
             gle::attribf(sx+(w*getcoord(FC_TL, 0)), sy+(h*getcoord(FC_TL, 1))); // 0
@@ -3514,12 +1976,10 @@ namespace UI
             gle::attribf(sx+(w*getcoord(FC_BR, 0)), sy+(h*getcoord(FC_BR, 1))); // 2
             gle::attribf(sx+(w*getcoord(FC_BL, 0)), sy+(h*getcoord(FC_BL, 1))); // 3
             gle::end();
-            if(width != 1) glLineWidth(1);
 
             Object::draw(sx, sy);
         }
     };
-    UIARG(Outline, outline, width, "f", float, FVAR_NONZERO, FVAR_MAX);
 
     ICOMMAND(0, uioutline, "iffe", (int *c, float *minw, float *minh, uint *children),
         BUILD(Outline, o, o->setup(*minw*uiscale, *minh*uiscale, Color(*c)), children));
@@ -3537,329 +1997,6 @@ namespace UI
         return false;
     }
 
-    struct Render : Target
-    {
-        Shader *shdr;
-        struct param
-        {
-            char *name;
-            vec4 value;
-
-            param() : name(NULL), value(0, 0, 0, 0) {}
-            ~param() { DELETEA(name); }
-        };
-
-        vector<param> params;
-        vector<Texture *> texs;
-
-        void setup(char *name_, float minw_ = 0, float minh_ = 0, const Color &color_ = Color(colourwhite))
-        {
-            Target::setup(minw_, minh_, color_);
-            shdr = lookupshaderbyname(name_);
-            if(!shdr) conoutf(colourred, "Cannot locate UI render shader: %s", name_);
-            params.setsize(0);
-            texs.setsize(0);
-        }
-
-        static const char *typestr() { return "#Render"; }
-        const char *gettype() const { return typestr(); }
-        bool isrender() const { return true; }
-
-        void startdraw()
-        {
-            if(shdr) shdr->set();
-            else
-            {
-                hudshader->set();
-                params.setsize(0);
-                texs.setsize(0);
-                texs.add(notexture);
-            }
-            gle::defvertex(2);
-            gle::deftexcoord0();
-        }
-
-        void draw(float sx, float sy)
-        {
-            setupdraw(CHANGE_SHADER);
-
-            LOCALPARAMF(curmillis, uilastmillis / 1000.0f, uitotalmillis / 1000.0f, lastmillis / 1000.0f, totalmillis / 1000.0f);
-            LOCALPARAMF(curticks, uiclockticks / 1000.0f, uiclockmillis / 1000.0f, getclockticks() / 1000.0f, getclockmillis() / 1000.0f);
-            LOCALPARAMF(viewsize, hudw * w, hudh * h, 1.0f / (hudw * w), 1.0f / (hudh * h));
-            
-            LOCALPARAMF(rendersize, sx, sy, w, h);
-
-            float waspect = w > h ? w / h : 1.0f, haspect = h > w ? h / w : 1.0f;
-            LOCALPARAMF(renderaspect, waspect, haspect, 1.0f / waspect, 1.0f / haspect);
-
-            vector<LocalShaderParam> list;
-            loopv(params)
-            {
-                LocalShaderParam param = list.add(LocalShaderParam(params[i].name));
-                param.set(params[i].value); // automatically converts to correct type
-            }
-            loopv(colors)
-            {
-                if(!i) continue; // becomes vcolor
-                defformatstring(texparam, "objcolor%d", i);
-                LocalShaderParam param = list.add(LocalShaderParam(texparam));
-                param.set(colors[i].val.tocolor4()); // automatically converts to correct type
-            }
-            loopv(texs)
-            {
-                glActiveTexture_(GL_TEXTURE0 + i);
-                settexture(texs[i]);
-                defformatstring(texparam, "texsize%d", i);
-                LocalShaderParam param = list.add(LocalShaderParam(texparam));
-                param.setf(texs[i]->w, texs[i]->h, texs[i]->xs, texs[i]->ys);
-            }
-            glActiveTexture_(GL_TEXTURE0);
-
-            colors[0].init();
-            gle::begin(GL_TRIANGLE_STRIP);
-            gle::attribf(sx+(w*getcoord(FC_TL, 0)), sy+(h*getcoord(FC_TL, 1))); gle::attribf(0, 0);
-            gle::attribf(sx+(w*getcoord(FC_TR, 0)), sy+(h*getcoord(FC_TR, 1))); gle::attribf(1, 0);
-            gle::attribf(sx+(w*getcoord(FC_BL, 0)), sy+(h*getcoord(FC_BL, 1))); gle::attribf(0, 1);
-            gle::attribf(sx+(w*getcoord(FC_BR, 0)), sy+(h*getcoord(FC_BR, 1))); gle::attribf(1, 1);
-            gle::end();
-
-            Object::draw(sx, sy);
-            stopdrawing();
-        }
-    };
-
-    ICOMMAND(0, uirender, "sffe", (char *name, float *minw, float *minh, uint *children), \
-        BUILD(Render, o, o->setup(name, *minw*uiscale, *minh*uiscale), children));
-
-    UICMD(Render, render, param, "sffff", (char *name, float *x, float *y, float *z, float *w),
-    {
-        if(!name || !*name) return;
-        Render::param *p = NULL;
-        loopv(o->params) if(!strcmp(o->params[i].name, name))
-        {
-            p = &o->params[i];
-            break;
-        }
-        if(!p)
-        {
-            p = &o->params.add();
-            p->name = newstring(name);
-        }
-        p->value = vec4(*x, *y, *z, *w);
-    });
-
-    UICMD(Render, render, pmcol, "sig", (char *name, int *c, float *a),
-    {
-        if(!name || !*name) return;
-        Render::param *p = NULL;
-        loopv(o->params) if(!strcmp(o->params[i].name, name))
-        {
-            p = &o->params[i];
-            break;
-        }
-        if(!p)
-        {
-            p = &o->params.add();
-            p->name = newstring(name);
-        }
-        p->value = vec4::fromcolor(*c, *a >= 0.0f ? *a : 1.0f);
-    });
-
-    UICMD(Render, render, tex, "sbbb", (char *name, int *tclamp, int *mipit, int *tgc),
-    {
-        if(!name || !*name || o->texs.length() >= 10) return;
-        o->texs.add(textureload(name, *tclamp >= 0 ? *tclamp : 3, *mipit != 0, false, *tgc >= 0 ? *tgc != 0 : texgc));
-    });
-
-    VAR(IDF_PERSIST, viewportsize, 0, 256, VAR_MAX); // limit size to this much
-    VAR(IDF_PERSIST, viewportuprate, 0, 50, VAR_MAX); // limit updates to this ms
-    VAR(IDF_PERSIST, viewportlimit, 0, 1, VAR_MAX); // limit updates to this count per cycle
-
-    struct ViewPortEntry
-    {
-        char *refname = NULL;
-        ViewSurface surf = ViewSurface(DRAWTEX_SCENE);
-        int lastupdate = 0, lastrender = 0, width = 0, height = 0, uprate = 0;
-        bool ready = false;
-
-        ViewPortEntry(const char *n) : refname(newstring(n)) {}
-        ~ViewPortEntry() { surf.destroy(); DELETEA(refname); }
-    };
-
-    vector<ViewPortEntry *> viewports;
-
-    ViewPortEntry *findviewport(const char *refname)
-    {
-        loopv(viewports) if(!strcmp(viewports[i]->refname, refname)) return viewports[i];
-        return NULL;
-    }
-
-    ViewPortEntry *getviewport(const char *refname)
-    {
-        ViewPortEntry *vp = findviewport(refname);
-        if(vp) return vp;
-        vp = new ViewPortEntry(refname);
-        viewports.add(vp);
-        return vp;
-    }
-
-    static inline bool vpsort(ViewPortEntry *a, ViewPortEntry *b)
-    {
-        if(a->lastrender < b->lastrender) return true;
-        if(a->lastrender > b->lastrender) return false;
-        return false;
-    }
-
-    int processviewports()
-    {
-        if(viewports.empty()) return 0;
-
-        if(viewportlimit) viewports.sort(vpsort);
-
-        static int lastframe = 0;
-        int rendered = 0, processed = 0;
-
-        loopv(viewports)
-        {
-            ViewPortEntry *vp = viewports[i];
-
-            if(lastframe && vp->lastupdate < lastframe)
-            {
-                viewports.removeobj(vp);
-                delete vp;
-                i--;
-                continue;
-            }
-
-            if(vp->ready)
-            {
-                if(!vp->uprate)
-                {   // zero uprate signals not to render more than once
-                    vp->lastrender = uiclockticks;
-                    continue;
-                }
-                if(uiclockticks - vp->lastrender < max(vp->uprate, viewportuprate)) continue;
-            }
-
-            vp->ready = vp->surf.render(min(vp->width, viewportsize), min(vp->height, viewportsize));
-            processed++;
-
-            if(vp->ready)
-            {
-                vp->lastrender = uiclockticks;
-                if(++rendered >= viewportlimit) break;
-            }
-        }
-
-        lastframe = uiclockticks;
-
-        return processed;
-    }
-
-    struct ViewPort : Target
-    {
-        char *refname = NULL;
-        int uprate = 0, width = 0, height = 0;
-        vec worldpos = vec(0, 0, 0);
-        float yaw = 0.0f, pitch = 0.0f, roll = 0.0f, fov = 90.0f, ratio = 0.0f, nearpoint = 0.54f, farscale = 1.0f;
-        ViewPortEntry *vp = NULL;
-
-        ViewPort() : refname(NULL) {}
-        ~ViewPort() { DELETEA(refname); }
-
-        void setup(const char *_refname, float _x, float _y, float _z, float _yaw, float _pitch, float minw_ = 0, float minh_ = 0, const Color &color_ = Color(colourwhite))
-        {
-            Target::setup(minw_, minh_, color_);
-            SETSTR(refname, _refname);
-            worldpos = vec(_x, _y, _z);
-            yaw = _yaw;
-            pitch = _pitch;
-            vp = NULL;
-        }
-
-        static const char *typestr() { return "#ViewPort"; }
-        const char *gettype() const { return typestr(); }
-        bool isviewport() const { return true; }
-
-        void init()
-        {
-            if(!refname || !*refname)
-            {
-                vp = NULL;
-                return;
-            }
-
-            vp = getviewport(refname);
-            if(!vp) return;
-
-            vp->uprate = uprate;
-            vp->width = width > 0 ? width : viewportsize;
-            vp->height = height > 0 ? height : viewportsize;
-            vp->lastupdate = uiclockticks;
-            vp->surf.worldpos = worldpos;
-            vp->surf.yaw = yaw;
-            vp->surf.pitch = pitch;
-            vp->surf.roll = roll;
-            vp->surf.fov = fov;
-            vp->surf.ratio = ratio;
-            vp->surf.nearpoint = nearpoint;
-            vp->surf.farscale = farscale;
-        }
-
-        void startdraw()
-        {
-            (!vp || !vp->ready ? hudshader : hudrectshader)->set();
-            gle::defvertex(2);
-            gle::deftexcoord0();
-        }
-
-        void draw(float sx, float sy)
-        {
-            setupdraw(CHANGE_SHADER);
-
-            colors[0].init();
-            if(!vp || !vp->ready)
-            {
-                settexture(notexture);
-
-                gle::begin(GL_TRIANGLE_STRIP);
-                gle::attribf(sx+(w*getcoord(FC_TL, 0)), sy+(h*getcoord(FC_TL, 1))); gle::attribf(0, 0);
-                gle::attribf(sx+(w*getcoord(FC_TR, 0)), sy+(h*getcoord(FC_TR, 1))); gle::attribf(1, 0);
-                gle::attribf(sx+(w*getcoord(FC_BL, 0)), sy+(h*getcoord(FC_BL, 1))); gle::attribf(0, 1);
-                gle::attribf(sx+(w*getcoord(FC_BR, 0)), sy+(h*getcoord(FC_BR, 1))); gle::attribf(1, 1);
-                gle::end();
-            }
-            else
-            {
-                vp->surf.bindtex();
-
-                gle::begin(GL_TRIANGLE_STRIP);
-                gle::attribf(sx+(w*getcoord(FC_TL, 0)), sy+(h*getcoord(FC_TL, 1))); gle::attribf(0, vp->surf.buffers[0]->height);
-                gle::attribf(sx+(w*getcoord(FC_TR, 0)), sy+(h*getcoord(FC_TR, 1))); gle::attribf(vp->surf.buffers[0]->width, vp->surf.buffers[0]->height);
-                gle::attribf(sx+(w*getcoord(FC_BL, 0)), sy+(h*getcoord(FC_BL, 1))); gle::attribf(0, 0);
-                gle::attribf(sx+(w*getcoord(FC_BR, 0)), sy+(h*getcoord(FC_BR, 1))); gle::attribf(vp->surf.buffers[0]->width, 0);
-                gle::end();
-            }
-
-            Object::draw(sx, sy);
-        }
-    };
-
-    ICOMMAND(0, uiviewport, "sfffffffe", (char *s, float *x, float *y, float *z, float *yaw, float *pitch, float *minw, float *minh, uint *children), \
-        BUILD(ViewPort, o, o->setup(s, *x, *y, *z, *yaw, *pitch, *minw*uiscale, *minh*uiscale), children));
-
-    UICMD(ViewPort, viewport, pos, "fff", (float *x, float *y, float *z), o->worldpos = vec(*x, *y, *z));
-    UIARGT(ViewPort, viewport, yaw, "f", float, 0.0f, 360.0f);
-    UIARGT(ViewPort, viewport, pitch, "f", float, -89.9f, 89.9f);
-    UIARGT(ViewPort, viewport, roll, "f", float, -180.0f, 180.0f);
-    UIARGT(ViewPort, viewport, fov, "f", float, 10.0f, 180.0f);
-    UIARGT(ViewPort, viewport, ratio, "f", float, FVAR_NONZERO, FVAR_MAX);
-    UIARGT(ViewPort, viewport, nearpoint, "f", float, 0.0f, 1.0f);
-    UIARGT(ViewPort, viewport, farscale, "f", float, FVAR_NONZERO, FVAR_MAX);
-    UIARGT(ViewPort, viewport, uprate, "i", int, 0, VAR_MAX);
-    UIARGT(ViewPort, viewport, width, "i", int, 2, VAR_MAX);
-    UIARGT(ViewPort, viewport, height, "i", int, 2, VAR_MAX);
-
     struct Image : Target
     {
         static Texture *lasttex;
@@ -3869,54 +2006,26 @@ namespace UI
         enum { CO_TL = 0, CO_TR, CO_TC, CO_BL, CO_BR, CO_BC, CO_ML, CO_MR, CO_MC, CO_MAX };
 
         Texture *tex;
-        bool alphatarget, outline, aspect;
-        int shadowtype;
-        float shadowsize;
-        Color shadowcolor;
+        bool alphatarget;
 
-        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, bool outline_ = false, float shadowsize_ = 0.f, bool aspect_ = false)
+        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0)
         {
-            Target::setup(minw_, minh_, color_);
+            Target::setup(minw_, minh_, color_, SOLID, VERTICAL);
             tex = tex_;
             alphatarget = alphatarget_;
-            outline = outline_;
-            shadowsize = shadowsize_;
-            shadowcolor = Color(0, 0, 0, 255);
-            shadowtype = 0;
-            aspect = aspect_;
         }
 
-        void setup(Texture *tex_, const Color &color_, const Color &color2_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, int dir_ = -1, bool outline_ = false, float shadowsize_ = 0.f, bool aspect_ = false)
+        void setup(Texture *tex_, const Color &color_, const Color &color2_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, int dir_ = VERTICAL)
         {
-            Target::setup(minw_, minh_, color_, -1, dir_);
+            Target::setup(minw_, minh_, color_, SOLID, dir_);
             colors.add(color2_); // gradient version
             tex = tex_;
             alphatarget = alphatarget_;
-            outline = outline_;
-            shadowsize = shadowsize_;
-            shadowcolor = Color(0, 0, 0, 255);
-            shadowtype = 0;
-            aspect = aspect_;
         }
 
         static const char *typestr() { return "#Image"; }
         const char *gettype() const { return typestr(); }
         bool isimage() const { return true; }
-
-        void layout()
-        {
-            Object::layout();
-
-            float mw = minw, mh = minh;
-            if(aspect && tex && (mw > 0 || mh > 0))
-            {
-                if(mw <= 0) mw = mh * (tex->w / float(tex->h));
-                else if(mh <= 0) mh = mw * (tex->h / float(tex->w));
-            }
-
-            w = max(w, mw);
-            h = max(h, mh);
-        }
 
         bool target(float cx, float cy)
         {
@@ -3935,26 +2044,11 @@ namespace UI
             gle::end();
         }
 
-        void bindtex(GLenum mode = GL_QUADS, int colstart = 0, bool forced = false, bool oline = false)
+        void bindtex(GLenum mode = GL_QUADS, int colstart = 0, bool forced = false)
         {
-            int flags = 0;
-            if(oline)
-            {
-                flags = CHANGE_SHADER;
-                hudoutlineshader->set();
-                LOCALPARAMF(textparams, 0.15f, 0.35f, 0.35f, 0.55f);
-            }
-
-            setupdraw(flags);
-
-            int col = clamp(colstart, -1, colors.length()-1);
-            Color c = colors.inrange(col) ? colors[col] : colors[0];
-            if(col < 0) switch(shadowtype)
-            {
-                case 1: c.combine(shadowcolor); break;
-                case 2: c.scale(shadowcolor); break;
-                case 0: default: c = shadowcolor; break;
-            }
+            changedraw(CHANGE_COLOR | CHANGE_BLEND);
+            if(type==MODULATE) modblend(); else resetblend();
+            int col = clamp(colstart, 0, colors.length()-1);
             if(forced || lastmode != mode)
             {
                 if(lastmode != GL_POINTS) gle::end();
@@ -3970,10 +2064,10 @@ namespace UI
                 gle::end();
             changetex:
                 lasttex = tex;
-                settexture(tex);
+                glBindTexture(GL_TEXTURE_2D, tex->id);
                 goto changecolor;
             }
-            if(lastcolor != c)
+            if(lastcolor != colors[col])
             {
                 gle::end();
             changecolor:
@@ -3982,44 +2076,43 @@ namespace UI
                     case GL_TRIANGLE_STRIP:
                         lastcolor = Color(0, 0, 0, 0);
                     case GL_QUADS:
-                        lastcolor = c;
-                        c.init();
+                        lastcolor = colors[col];
+                        colors[col].init();
                         break;
                 }
             }
         }
 
-        bool drawmapped(float sx, float sy, vec2 coordmap[FC_MAX], vec2 tcoordmap[FC_MAX], int colstart = 0, int colcount = 0, bool forced = false, bool shading = false)
+        bool drawmapped(float sx, float sy, vec2 coordmap[FC_MAX], vec2 tcoordmap[FC_MAX], int colstart = 0, int colcount = 0, bool forced = false)
         {
-            int cols = clamp(colcount ? colcount : colors.length()-colstart, 0, colors.length());
-            if(!shading && cols >= 2)
+            int cols = clamp(colcount ? colcount : colors.length()-colstart, min(colstart, colors.length()-1), colors.length());
+            if(cols >= 2)
             {
-                bindtex(GL_TRIANGLE_STRIP, colstart, forced, !shading && outline);
-                float vr = 1/float(cols-1), vcx1 = 0, vcx2 = 0, vcy1 = 0, vcy2 = 0,
-                    vw1 = coordmap[FC_TR][0]-coordmap[FC_TL][0], vx1 = coordmap[FC_TL][0],
-                    vw2 = coordmap[FC_BR][0]-coordmap[FC_BL][0], vx2 = coordmap[FC_BL][0],
-                    vdw1 = coordmap[FC_BL][0]-coordmap[FC_TL][0], vdw2 = coordmap[FC_BR][0]-coordmap[FC_TR][0],
-                    vh1 = coordmap[FC_BL][1]-coordmap[FC_TL][1], vy1 = coordmap[FC_TL][1],
-                    vh2 = coordmap[FC_BR][1]-coordmap[FC_TR][1], vy2 = coordmap[FC_TR][1],
-                    vdh1 = coordmap[FC_TR][1]-coordmap[FC_TL][1], vdh2 = coordmap[FC_BR][1]-coordmap[FC_BL][1],
-                    tcx1 = 0, tcx2 = 0, tcy1 = 0, tcy2 = 0,
-                    tw1 = tcoordmap[FC_TR][0]-tcoordmap[FC_TL][0], tx1 = tcoordmap[FC_TL][0],
-                    tw2 = tcoordmap[FC_BR][0]-tcoordmap[FC_BL][0], tx2 = tcoordmap[FC_BL][0],
-                    tdw1 = tcoordmap[FC_BL][0]-tcoordmap[FC_TL][0], tdw2 = tcoordmap[FC_BR][0]-tcoordmap[FC_TR][0],
-                    th1 = tcoordmap[FC_BL][1]-tcoordmap[FC_TL][1], ty1 = tcoordmap[FC_TL][1],
-                    th2 = tcoordmap[FC_BR][1]-tcoordmap[FC_TR][1], ty2 = tcoordmap[FC_TR][1],
-                    tdh1 = tcoordmap[FC_TR][1]-tcoordmap[FC_TL][1], tdh2 = tcoordmap[FC_BR][1]-tcoordmap[FC_BL][1];
+                bindtex(GL_TRIANGLE_STRIP, colstart, forced);
+                float vr = 1/float(cols-1), vs = 0, vcx1 = 0, vcx2 = 0, vcy1 = 0, vcy2 = 0,
+                      vw1 = coordmap[FC_TR][0]-coordmap[FC_TL][0], vx1 = coordmap[FC_TL][0],
+                      vw2 = coordmap[FC_BR][0]-coordmap[FC_BL][0], vx2 = coordmap[FC_BL][0],
+                      vdw1 = coordmap[FC_BL][0]-coordmap[FC_TL][0], vdw2 = coordmap[FC_BR][0]-coordmap[FC_TR][0],
+                      vh1 = coordmap[FC_BL][1]-coordmap[FC_TL][1], vy1 = coordmap[FC_TL][1],
+                      vh2 = coordmap[FC_BR][1]-coordmap[FC_TR][1], vy2 = coordmap[FC_TR][1],
+                      vdh1 = coordmap[FC_TR][1]-coordmap[FC_TL][1], vdh2 = coordmap[FC_BR][1]-coordmap[FC_BL][1],
+                      tcx1 = 0, tcx2 = 0, tcy1 = 0, tcy2 = 0,
+                      tw1 = tcoordmap[FC_TR][0]-tcoordmap[FC_TL][0], tx1 = tcoordmap[FC_TL][0],
+                      tw2 = tcoordmap[FC_BR][0]-tcoordmap[FC_BL][0], tx2 = tcoordmap[FC_BL][0],
+                      tdw1 = tcoordmap[FC_BL][0]-tcoordmap[FC_TL][0], tdw2 = tcoordmap[FC_BR][0]-tcoordmap[FC_TR][0],
+                      th1 = tcoordmap[FC_BL][1]-tcoordmap[FC_TL][1], ty1 = tcoordmap[FC_TL][1],
+                      th2 = tcoordmap[FC_BR][1]-tcoordmap[FC_TR][1], ty2 = tcoordmap[FC_TR][1],
+                      tdh1 = tcoordmap[FC_TR][1]-tcoordmap[FC_TL][1], tdh2 = tcoordmap[FC_BR][1]-tcoordmap[FC_BL][1];
                 loopi(cols-1)
                 {
-                    int color1 = i + colstart, color2 = (color1 + 1) % cols; // wrap around
                     switch(dir)
                     {
                         case HORIZONTAL:
                         {
-                            gle::attribf(sx+vx1+vcx1, sy+vy1+vcy1); gle::attribf(tx1+tcx1, ty1+tcy1); colors[color1].attrib(); // 0
-                            gle::attribf(sx+vx1+vcx1+(vw1*vr), sy+vy1+vcy1+(vdh1*vr)); gle::attribf(tx1+tcx1+(tw1*vr), ty1+tcy1+(tdh1*vr)); colors[color2].attrib(); // 1
-                            gle::attribf(sx+vx2+vcx2, sy+vy1+vcy2+vh1); gle::attribf(tx2+tcx2, ty1+tcy2+th1); colors[color1].attrib(); // 3
-                            gle::attribf(sx+vx2+vcx2+(vw2*vr), sy+vy1+vcy2+vh1+(vdh2*vr)); gle::attribf(tx2+tcx2+(tw2*vr), ty1+tcy2+th1+(tdh2*vr)); colors[color2].attrib(); // 2
+                            gle::attribf(sx+vx1+vcx1, sy+vy1+vcy1); gle::attribf(tx1+tcx1, ty1+tcy1); colors[i+colstart].attrib(); // 0
+                            gle::attribf(sx+vx1+vcx1+(vw1*vr), sy+vy1+vcy1+(vdh1*vr)); gle::attribf(tx1+tcx1+(tw1*vr), ty1+tcy1+(tdh1*vr)); colors[i+colstart+1].attrib(); // 1
+                            gle::attribf(sx+vx2+vcx2, sy+vy1+vcy2+vh1); gle::attribf(tx2+tcx2, ty1+tcy2+th1); colors[i+colstart].attrib(); // 3
+                            gle::attribf(sx+vx2+vcx2+(vw2*vr), sy+vy1+vcy2+vh1+(vdh2*vr)); gle::attribf(tx2+tcx2+(tw2*vr), ty1+tcy2+th1+(tdh2*vr)); colors[i+colstart+1].attrib(); // 2
                             vcx1 += vw1*vr;
                             vcx2 += vw2*vr;
                             vcy1 += vdh1*vr;
@@ -4032,10 +2125,10 @@ namespace UI
                         }
                         case VERTICAL:
                         {
-                            gle::attribf(sx+vx1+vcx2+vw1, sy+vy2+vcy2); gle::attribf(tx1+tcx2+tw1, ty2+tcy2); colors[color1].attrib(); // 1
-                            gle::attribf(sx+vx1+vcx2+vw1+(vdw2*vr), sy+vy2+vcy2+(vh2*vr)); gle::attribf(tx1+tcx2+tw1+(tdw2*vr), ty2+tcy2+(th2*vr)); colors[color2].attrib(); // 2
-                            gle::attribf(sx+vx1+vcx1, sy+vy1+vcy1); gle::attribf(tx1+tcx1, ty1+tcy1); colors[color1].attrib(); // 0
-                            gle::attribf(sx+vx1+vcx1+(vdw1*vr), sy+vy1+vcy1+(vh1*vr)); gle::attribf(tx1+tcx1+(tdw1*vr), ty1+tcy1+(th1*vr)); colors[color2].attrib(); // 3
+                            gle::attribf(sx+vx1+vcx2+vw1, sy+vy2+vcy2); gle::attribf(tx1+tcx2+tw1, ty2+tcy2); colors[i+colstart].attrib(); // 1
+                            gle::attribf(sx+vx1+vcx2+vw1+(vdw2*vr), sy+vy2+vcy2+(vh2*vr)); gle::attribf(tx1+tcx2+tw1+(tdw2*vr), ty2+tcy2+(th2*vr)); colors[i+colstart+1].attrib(); // 2
+                            gle::attribf(sx+vx1+vcx1, sy+vy1+vcy1); gle::attribf(tx1+tcx1, ty1+tcy1); colors[i+colstart].attrib(); // 0
+                            gle::attribf(sx+vx1+vcx1+(vdw1*vr), sy+vy1+vcy1+(vh1*vr)); gle::attribf(tx1+tcx1+(tdw1*vr), ty1+tcy1+(th1*vr)); colors[i+colstart+1].attrib(); // 3
                             vcy1 += vh1*vr;
                             vcy2 += vh2*vr;
                             vcx1 += vdw1*vr;
@@ -4047,12 +2140,13 @@ namespace UI
                             break;
                         }
                     }
-                    lastcolor = colors[color2];
+                    lastcolor = colors[i+colstart+1];
+                    vs += vr;
                 }
             }
             else
             {
-                bindtex(GL_QUADS, colstart, forced, !shading && outline);
+                bindtex(GL_QUADS, colstart, forced);
                 gle::attribf(sx+coordmap[FC_TL][0], sy+coordmap[FC_TL][1]); gle::attribf(tcoordmap[FC_TL][0], tcoordmap[FC_TL][1]); // 0
                 gle::attribf(sx+coordmap[FC_TR][0], sy+coordmap[FC_TR][1]); gle::attribf(tcoordmap[FC_TR][0], tcoordmap[FC_TR][1]); // 1
                 gle::attribf(sx+coordmap[FC_BR][0], sy+coordmap[FC_BR][1]); gle::attribf(tcoordmap[FC_BR][0], tcoordmap[FC_BR][1]); // 2
@@ -4065,24 +2159,13 @@ namespace UI
         {
             if(tex == notexture) { Object::draw(sx, sy); return; }
 
-            float gs = fabs(shadowsize), gw = max(w-(shadowsize != 0 ? float(gs) : 0.f), 0.f), gh = max(h-(shadowsize != 0 ? float(gs) : 0.f), 0.f);
-            loopk(shadowsize != 0 ? 2 : 1)
+            vec2 coordmap[FC_MAX], tcoordmap[FC_MAX];
+            loopi(FC_MAX) loopj(2)
             {
-                bool shading = shadowsize != 0 && !k;
-                float gx = sx, gy = sy;
-                if((shadowsize > 0 && !k) || (shadowsize < 0 && k))
-                {
-                    gx += gs;
-                    gy += gs;
-                }
-                vec2 coordmap[FC_MAX], tcoordmap[FC_MAX];
-                loopi(FC_MAX) loopj(2)
-                {
-                    coordmap[i][j] = getcoord(i, j)*(j ? gh : gw);
-                    tcoordmap[i][j] = defcoords[i][j];
-                }
-                drawmapped(gx, gy, coordmap, tcoordmap, shading ? -1 : 0, 0, false, shading);
+                coordmap[i][j] = getcoord(i, j)*(j ? h : w);
+                tcoordmap[i][j] = defcoords[i][j];
             }
+            drawmapped(sx, sy, coordmap, tcoordmap);
 
             Object::draw(sx, sy);
         }
@@ -4094,36 +2177,25 @@ namespace UI
 
     #define UIIMGCMDS(name, value) \
         ICOMMAND(0, uiimage##name, "siiffe", (char *texname, int *c, int *a, float *minw, float *minh, uint *children), \
-            BUILD(Image, o, o->setup(textureload(texname, value, true, false, texgc), Color(*c), *a!=0, *minw*uiscale, *minh*uiscale), children)); \
+            BUILD(Image, o, o->setup(textureload(texname, value, true, false), Color(*c), *a!=0, *minw*uiscale, *minh*uiscale), children)); \
         ICOMMAND(0, uiimagevgradient##name, "siiiffe", (char *texname, int *c, int *c2, int *a, float *minw, float *minh, uint *children), \
-            BUILD(Image, o, o->setup(textureload(texname, value, true, false, texgc), Color(*c), Color(*c2), *a!=0, *minw*uiscale, *minh*uiscale), children)); \
+            BUILD(Image, o, o->setup(textureload(texname, value, true, false), Color(*c), Color(*c2), *a!=0, *minw*uiscale, *minh*uiscale, Image::VERTICAL), children)); \
         ICOMMAND(0, uiimagehgradient##name, "siiiffe", (char *texname, int *c, int *c2, int *a, float *minw, float *minh, uint *children), \
-            BUILD(Image, o, o->setup(textureload(texname, value, true, false, texgc), Color(*c), Color(*c2), *a!=0, *minw*uiscale, *minh*uiscale, Image::HORIZONTAL), children)); \
-        UICMDT(Image, image, tex##name, "s", (char *texname), if(texname && *texname) o->tex = textureload(texname, value, true, false, texgc)); \
-        UICMDT(Image, image, alttex##name, "s", (char *texname), if(texname && *texname && o->tex == notexture) o->tex = textureload(texname, value, true, false, texgc));
+            BUILD(Image, o, o->setup(textureload(texname, value, true, false), Color(*c), Color(*c2), *a!=0, *minw*uiscale, *minh*uiscale, Image::HORIZONTAL), children)); \
+        UICMDT(Image, image, tex##name, "s", (char *texname), if(texname && *texname) o->tex = textureload(texname, value, true, false)); \
+        UICMDT(Image, image, alttex##name, "s", (char *texname), if(texname && *texname && o->tex == notexture) o->tex = textureload(texname, value, true, false));
 
     UIIMGCMDS(, 3);
     UIIMGCMDS(clamped, 0x7000);
-    UIARGTB(Image, image, alphatarget);
-    UIARGTB(Image, image, outline);
-    UIARGTB(Image, image, aspect);
-    UICMDT(Image, image, shadow, "fii", (float *s, int *c, int *t),
-    {
-        o->shadowsize = clamp(*s, FVAR_MIN, FVAR_MAX);
-        o->shadowcolor = Color(*c);
-        o->shadowtype = *t;
-    });
-    UIARGT(Image, image, shadowsize, "f", float, FVAR_MIN, FVAR_MAX);
-    UICMDT(Image, image, shadowcolour, "i", (int *c), o->shadowcolor = Color(*c));
-    UICMDT(Image, image, shadowtype, "i", (int *t), o->shadowtype = *t);
+    UIARGB(Image, image, alphatarget);
 
     struct CroppedImage : Image
     {
         float cropx, cropy, cropw, croph;
 
-        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, float cropx_ = 0, float cropy_ = 0, float cropw_ = 1, float croph_ = 1, bool outline_ = false, float shadowsize_ = 0.f)
+        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, float cropx_ = 0, float cropy_ = 0, float cropw_ = 1, float croph_ = 1)
         {
-            Image::setup(tex_, color_, alphatarget_, minw_, minh_, outline_, shadowsize_);
+            Image::setup(tex_, color_, alphatarget_, minw_, minh_);
             cropx = cropx_;
             cropy = cropy_;
             cropw = cropw_;
@@ -4142,25 +2214,14 @@ namespace UI
         {
             if(tex == notexture) { Object::draw(sx, sy); return; }
 
-            float gs = fabs(shadowsize), gw = max(w-(shadowsize != 0 ? float(gs) : 0.f), 0.f), gh = max(h-(shadowsize != 0 ? float(gs) : 0.f), 0.f);
-            loopk(shadowsize != 0 ? 2 : 1)
+            float texmap[FC_MAX][2] = { { cropx, cropy }, { cropx+cropw, cropy }, { cropx+cropw, cropy+croph }, { cropx, cropy+croph } };
+            vec2 coordmap[FC_MAX], tcoordmap[FC_MAX];
+            loopi(FC_MAX) loopj(2)
             {
-                bool shading = shadowsize != 0 && !k;
-                float gx = sx, gy = sy;
-                if((shadowsize > 0 && !k) || (shadowsize < 0 && k))
-                {
-                    gx += gs;
-                    gy += gs;
-                }
-                float texmap[FC_MAX][2] = { { cropx, cropy }, { cropx+cropw, cropy }, { cropx+cropw, cropy+croph }, { cropx, cropy+croph } };
-                vec2 coordmap[FC_MAX], tcoordmap[FC_MAX];
-                loopi(FC_MAX) loopj(2)
-                {
-                    coordmap[i][j] = getcoord(i, j)*(j ? gh : gw);
-                    tcoordmap[i][j] = texmap[i][j];
-                }
-                drawmapped(gx, gy, coordmap, tcoordmap, shading ? -1 : 0, 0, false, shading);
+                coordmap[i][j] = getcoord(i, j)*(j ? h : w);
+                tcoordmap[i][j] = texmap[i][j];
             }
+            drawmapped(sx, sy, coordmap, tcoordmap);
 
             Object::draw(sx, sy);
         }
@@ -4186,7 +2247,7 @@ namespace UI
     #define UICIMGCMDS(name, value) \
         ICOMMAND(0, uicroppedimage##name, "siifftttte", (char *texname, int *c, int *a, float *minw, float *minh, tagval *cropx, tagval *cropy, tagval *cropw, tagval *croph, uint *children), \
             BUILD(CroppedImage, o, { \
-                Texture *tex = textureload(texname, value, true, false, texgc); \
+                Texture *tex = textureload(texname, value, true, false); \
                 o->setup(tex, Color(*c), *a!=0, *minw*uiscale, *minh*uiscale, \
                     parsepixeloffset(cropx, tex->xs), parsepixeloffset(cropy, tex->ys), \
                     parsepixeloffset(cropw, tex->xs), parsepixeloffset(croph, tex->ys)); \
@@ -4225,49 +2286,38 @@ namespace UI
         {
             if(tex == notexture) { Object::draw(sx, sy); return; }
 
-            float gs = fabs(shadowsize), gw = max(w-(shadowsize != 0 ? float(gs) : 0.f), 0.f), gh = max(h-(shadowsize != 0 ? float(gs) : 0.f), 0.f);
-            loopk(shadowsize != 0 ? 2 : 1)
-            {
-                bool shading = shadowsize != 0 && !k;
-                float gx = sx, gy = sy;
-                if((shadowsize > 0 && !k) || (shadowsize < 0 && k))
-                {
-                    gx += gs;
-                    gy += gs;
-                }
-                bindtex(GL_QUADS, shading ? -1 : 0, false, !shading && outline);
+            bindtex();
 
-                float splitw = (minw ? min(minw, gw) : gw) / 2,
-                    splith = (minh ? min(minh, gh) : gh) / 2,
-                    vy = gy, ty = 0;
-                loopi(3)
+            float splitw = (minw ? min(minw, w) : w) / 2,
+                  splith = (minh ? min(minh, h) : h) / 2,
+                  vy = sy, ty = 0;
+            loopi(3)
+            {
+                float vh = 0, th = 0;
+                switch(i)
                 {
-                    float vh = 0, th = 0;
-                    switch(i)
-                    {
-                        case 0: if(splith < gh - splith) { vh = splith; th = 0.5f; } else { vh = gh; th = 1; } break;
-                        case 1: vh = gh - 2*splith; th = 0; break;
-                        case 2: vh = splith; th = 0.5f; break;
-                    }
-                    float vx = gx, tx = 0;
-                    loopj(3)
-                    {
-                        float vw = 0, tw = 0;
-                        switch(j)
-                        {
-                            case 0: if(splitw < gw - splitw) { vw = splitw; tw = 0.5f; } else { vw = gw; tw = 1; } break;
-                            case 1: vw = gw - 2*splitw; tw = 0; break;
-                            case 2: vw = splitw; tw = 0.5f; break;
-                        }
-                        quads(vx, vy, vw, vh, tx, ty, tw, th);
-                        vx += vw;
-                        tx += tw;
-                        if(tx >= 1) break;
-                    }
-                    vy += vh;
-                    ty += th;
-                    if(ty >= 1) break;
+                    case 0: if(splith < h - splith) { vh = splith; th = 0.5f; } else { vh = h; th = 1; } break;
+                    case 1: vh = h - 2*splith; th = 0; break;
+                    case 2: vh = splith; th = 0.5f; break;
                 }
+                float vx = sx, tx = 0;
+                loopj(3)
+                {
+                    float vw = 0, tw = 0;
+                    switch(j)
+                    {
+                        case 0: if(splitw < w - splitw) { vw = splitw; tw = 0.5f; } else { vw = w; tw = 1; } break;
+                        case 1: vw = w - 2*splitw; tw = 0; break;
+                        case 2: vw = splitw; tw = 0.5f; break;
+                    }
+                    quads(vx, vy, vw, vh, tx, ty, tw, th);
+                    vx += vw;
+                    tx += tw;
+                    if(tx >= 1) break;
+                }
+                vy += vh;
+                ty += th;
+                if(ty >= 1) break;
             }
 
             Object::draw(sx, sy);
@@ -4276,7 +2326,7 @@ namespace UI
 
     #define UISIMGCMDS(name, value) \
         ICOMMAND(0, uistretchedimage##name, "siiffe", (char *texname, int *c, int *a, float *minw, float *minh, uint *children), \
-            BUILD(StretchedImage, o, o->setup(textureload(texname, value, true, false, texgc), Color(*c), *a!=0, *minw*uiscale, *minh*uiscale), children));
+            BUILD(StretchedImage, o, o->setup(textureload(texname, value, true, false), Color(*c), *a!=0, *minw*uiscale, *minh*uiscale), children));
 
     UISIMGCMDS(, 3);
     UISIMGCMDS(clamped, 0x7000);
@@ -4285,9 +2335,9 @@ namespace UI
     {
         float texborder, screenborder;
 
-        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float texborder_ = 0, float screenborder_ = 0, float minw_ = 0, float minh_ = 0, bool outline_ = false, float shadowsize_ = 0.f)
+        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float texborder_ = 0, float screenborder_ = 0, float minw_ = 0, float minh_ = 0)
         {
-            Image::setup(tex_, color_, alphatarget_, minw_, minh_, outline_, shadowsize_);
+            Image::setup(tex_, color_, alphatarget_, minw_, minh_);
             texborder = texborder_;
             screenborder = screenborder_;
         }
@@ -4314,137 +2364,127 @@ namespace UI
         {
             if(tex == notexture) { Object::draw(sx, sy); return; }
 
-            float gs = fabs(shadowsize), gw = max(w-(shadowsize != 0 ? float(gs) : 0.f), 0.f), gh = max(h-(shadowsize != 0 ? float(gs) : 0.f), 0.f);
-            loopk(shadowsize != 0 ? 2 : 1)
+            vec2 outline[FC_MAX], projdir[2], coordmap[CO_MAX][FC_MAX], tcoordmap[CO_MAX][FC_MAX];
+            loopi(FC_MAX) loopj(2) outline[i].v[j] = getcoord(i, j)*(j ? h : w);
+
+            // top left
+            projdir[0] = vec2(outline[1]).sub(outline[0]).normalize();
+            projdir[1] = vec2(outline[3]).sub(outline[0]).normalize();
+            coordmap[CO_TL][FC_TL] = outline[0];
+            coordmap[CO_TL][FC_TR] = vec2(coordmap[CO_TL][FC_TL]).add(vec2(projdir[0]).mul(screenborder));
+            coordmap[CO_TL][FC_BL] = vec2(coordmap[CO_TL][FC_TL]).add(vec2(projdir[1]).mul(screenborder));
+            coordmap[CO_TL][FC_BR] = vec2(coordmap[CO_TL][FC_BL]).add(vec2(projdir[0]).mul(screenborder));
+            tcoordmap[CO_TL][FC_TL] = vec2(0, 0);
+            tcoordmap[CO_TL][FC_TR] = vec2(texborder, 0);
+            tcoordmap[CO_TL][FC_BR] = vec2(texborder, texborder);
+            tcoordmap[CO_TL][FC_BL] = vec2(0, texborder);
+
+            // top right
+            projdir[0] = vec2(outline[0]).sub(outline[1]).normalize();
+            projdir[1] = vec2(outline[2]).sub(outline[1]).normalize();
+            coordmap[CO_TR][FC_TR] = outline[1];
+            coordmap[CO_TR][FC_TL] = vec2(coordmap[CO_TR][FC_TR]).add(vec2(projdir[0]).mul(screenborder));
+            coordmap[CO_TR][FC_BR] = vec2(coordmap[CO_TR][FC_TR]).add(vec2(projdir[1]).mul(screenborder));
+            coordmap[CO_TR][FC_BL] = vec2(coordmap[CO_TR][FC_BR]).add(vec2(projdir[0]).mul(screenborder));
+            tcoordmap[CO_TR][FC_TL] = vec2(1-texborder, 0);
+            tcoordmap[CO_TR][FC_TR] = vec2(1, 0);
+            tcoordmap[CO_TR][FC_BR] = vec2(1, texborder);
+            tcoordmap[CO_TR][FC_BL] = vec2(1-texborder, texborder);
+
+            // top center
+            coordmap[CO_TC][FC_TL] = coordmap[CO_TL][FC_TR];
+            coordmap[CO_TC][FC_TR] = coordmap[CO_TR][FC_TL];
+            coordmap[CO_TC][FC_BR] = coordmap[CO_TR][FC_BL];
+            coordmap[CO_TC][FC_BL] = coordmap[CO_TL][FC_BR];
+            tcoordmap[CO_TC][FC_TL] = vec2(texborder, 0);
+            tcoordmap[CO_TC][FC_TR] = vec2(1-texborder, 0);
+            tcoordmap[CO_TC][FC_BR] = vec2(1-texborder, texborder);
+            tcoordmap[CO_TC][FC_BL] = vec2(texborder, texborder);
+
+            // bottom left
+            projdir[0] = vec2(outline[2]).sub(outline[3]).normalize();
+            projdir[1] = vec2(outline[0]).sub(outline[3]).normalize();
+            coordmap[CO_BL][FC_BL] = outline[3];
+            coordmap[CO_BL][FC_TL] = vec2(coordmap[CO_BL][FC_BL]).add(vec2(projdir[1]).mul(screenborder));
+            coordmap[CO_BL][FC_BR] = vec2(coordmap[CO_BL][FC_BL]).add(vec2(projdir[0]).mul(screenborder));
+            coordmap[CO_BL][FC_TR] = vec2(coordmap[CO_BL][FC_BR]).add(vec2(projdir[1]).mul(screenborder));
+            tcoordmap[CO_BL][FC_TL] = vec2(0, 1-texborder);
+            tcoordmap[CO_BL][FC_TR] = vec2(texborder, 1-texborder);
+            tcoordmap[CO_BL][FC_BR] = vec2(texborder, 1);
+            tcoordmap[CO_BL][FC_BL] = vec2(0, 1);
+
+            // bottom right
+            projdir[0] = vec2(outline[3]).sub(outline[2]).normalize();
+            projdir[1] = vec2(outline[1]).sub(outline[2]).normalize();
+            coordmap[CO_BR][FC_BR] = outline[2];
+            coordmap[CO_BR][FC_TR] = vec2(coordmap[CO_BR][FC_BR]).add(vec2(projdir[1]).mul(screenborder));
+            coordmap[CO_BR][FC_BL] = vec2(coordmap[CO_BR][FC_BR]).add(vec2(projdir[0]).mul(screenborder));
+            coordmap[CO_BR][FC_TL] = vec2(coordmap[CO_BR][FC_BL]).add(vec2(projdir[1]).mul(screenborder));
+            tcoordmap[CO_BR][FC_TL] = vec2(1-texborder, 1-texborder);
+            tcoordmap[CO_BR][FC_TR] = vec2(1, 1-texborder);
+            tcoordmap[CO_BR][FC_BR] = vec2(1, 1);
+            tcoordmap[CO_BR][FC_BL] = vec2(1-texborder, 1);
+
+            // bottom center
+            coordmap[CO_BC][FC_TL] = coordmap[CO_BL][FC_TR];
+            coordmap[CO_BC][FC_TR] = coordmap[CO_BR][FC_TL];
+            coordmap[CO_BC][FC_BR] = coordmap[CO_BR][FC_BL];
+            coordmap[CO_BC][FC_BL] = coordmap[CO_BL][FC_BR];
+            tcoordmap[CO_BC][FC_TL] = vec2(texborder, 1-texborder);
+            tcoordmap[CO_BC][FC_TR] = vec2(1-texborder, 1-texborder);
+            tcoordmap[CO_BC][FC_BR] = vec2(1-texborder, 1);
+            tcoordmap[CO_BC][FC_BL] = vec2(texborder, 1);
+
+            // middle left
+            coordmap[CO_ML][FC_TL] = coordmap[CO_TL][FC_BL];
+            coordmap[CO_ML][FC_TR] = coordmap[CO_TL][FC_BR];
+            coordmap[CO_ML][FC_BR] = coordmap[CO_BL][FC_TR];
+            coordmap[CO_ML][FC_BL] = coordmap[CO_BL][FC_TL];
+            tcoordmap[CO_ML][FC_TL] = vec2(0, texborder);
+            tcoordmap[CO_ML][FC_TR] = vec2(texborder, texborder);
+            tcoordmap[CO_ML][FC_BR] = vec2(texborder, 1-texborder);
+            tcoordmap[CO_ML][FC_BL] = vec2(0, 1-texborder);
+
+            // middle right
+            coordmap[CO_MR][FC_TL] = coordmap[CO_TR][FC_BL];
+            coordmap[CO_MR][FC_TR] = coordmap[CO_TR][FC_BR];
+            coordmap[CO_MR][FC_BR] = coordmap[CO_BR][FC_TR];
+            coordmap[CO_MR][FC_BL] = coordmap[CO_BR][FC_TL];
+            tcoordmap[CO_MR][FC_TL] = vec2(1-texborder, texborder);
+            tcoordmap[CO_MR][FC_TR] = vec2(1, texborder);
+            tcoordmap[CO_MR][FC_BR] = vec2(1, 1-texborder);
+            tcoordmap[CO_MR][FC_BL] = vec2(1-texborder, 1-texborder);
+
+            // middle center
+            coordmap[CO_MC][FC_TL] = coordmap[CO_TL][FC_BR];
+            coordmap[CO_MC][FC_TR] = coordmap[CO_TR][FC_BL];
+            coordmap[CO_MC][FC_BR] = coordmap[CO_BR][FC_TL];
+            coordmap[CO_MC][FC_BL] = coordmap[CO_BL][FC_TR];
+            tcoordmap[CO_MC][FC_TL] = vec2(texborder, texborder);
+            tcoordmap[CO_MC][FC_TR] = vec2(1-texborder, texborder);
+            tcoordmap[CO_MC][FC_BR] = vec2(1-texborder, 1-texborder);
+            tcoordmap[CO_MC][FC_BL] = vec2(1-texborder, texborder);
+
+            if(colors.length() >= 2)
             {
-                bool shading = shadowsize != 0 && !k;
-                float gx = sx, gy = sy;
-                if((shadowsize > 0 && !k) || (shadowsize < 0 && k))
+                static const int drawmap[2][CO_MAX] = {
+                    { CO_TL, CO_ML, CO_BL, CO_TC, CO_MC, CO_BC, CO_TR, CO_MR, CO_BR }, // VERTICAL
+                    { CO_TL, CO_TC, CO_TR, CO_ML, CO_MC, CO_MR, CO_BL, CO_BC, CO_BR }  // HORIZONTAL
+                };
+                loopi(3) loopj(3)
                 {
-                    gx += gs;
-                    gy += gs;
-                }
-                vec2 outline[FC_MAX], projdir[2], coordmap[CO_MAX][FC_MAX], tcoordmap[CO_MAX][FC_MAX];
-                loopi(FC_MAX) loopj(2) outline[i][j] = getcoord(i, j)*(j ? gh : gw);
-
-                // top left
-                projdir[0] = vec2(outline[1]).sub(outline[0]).normalize();
-                projdir[1] = vec2(outline[3]).sub(outline[0]).normalize();
-                coordmap[CO_TL][FC_TL] = outline[0];
-                coordmap[CO_TL][FC_TR] = vec2(coordmap[CO_TL][FC_TL]).add(vec2(projdir[0]).mul(screenborder));
-                coordmap[CO_TL][FC_BL] = vec2(coordmap[CO_TL][FC_TL]).add(vec2(projdir[1]).mul(screenborder));
-                coordmap[CO_TL][FC_BR] = vec2(coordmap[CO_TL][FC_BL]).add(vec2(projdir[0]).mul(screenborder));
-                tcoordmap[CO_TL][FC_TL] = vec2(0, 0);
-                tcoordmap[CO_TL][FC_TR] = vec2(texborder, 0);
-                tcoordmap[CO_TL][FC_BR] = vec2(texborder, texborder);
-                tcoordmap[CO_TL][FC_BL] = vec2(0, texborder);
-
-                // top right
-                projdir[0] = vec2(outline[0]).sub(outline[1]).normalize();
-                projdir[1] = vec2(outline[2]).sub(outline[1]).normalize();
-                coordmap[CO_TR][FC_TR] = outline[1];
-                coordmap[CO_TR][FC_TL] = vec2(coordmap[CO_TR][FC_TR]).add(vec2(projdir[0]).mul(screenborder));
-                coordmap[CO_TR][FC_BR] = vec2(coordmap[CO_TR][FC_TR]).add(vec2(projdir[1]).mul(screenborder));
-                coordmap[CO_TR][FC_BL] = vec2(coordmap[CO_TR][FC_BR]).add(vec2(projdir[0]).mul(screenborder));
-                tcoordmap[CO_TR][FC_TL] = vec2(1-texborder, 0);
-                tcoordmap[CO_TR][FC_TR] = vec2(1, 0);
-                tcoordmap[CO_TR][FC_BR] = vec2(1, texborder);
-                tcoordmap[CO_TR][FC_BL] = vec2(1-texborder, texborder);
-
-                // top center
-                coordmap[CO_TC][FC_TL] = coordmap[CO_TL][FC_TR];
-                coordmap[CO_TC][FC_TR] = coordmap[CO_TR][FC_TL];
-                coordmap[CO_TC][FC_BR] = coordmap[CO_TR][FC_BL];
-                coordmap[CO_TC][FC_BL] = coordmap[CO_TL][FC_BR];
-                tcoordmap[CO_TC][FC_TL] = vec2(texborder, 0);
-                tcoordmap[CO_TC][FC_TR] = vec2(1-texborder, 0);
-                tcoordmap[CO_TC][FC_BR] = vec2(1-texborder, texborder);
-                tcoordmap[CO_TC][FC_BL] = vec2(texborder, texborder);
-
-                // bottom left
-                projdir[0] = vec2(outline[2]).sub(outline[3]).normalize();
-                projdir[1] = vec2(outline[0]).sub(outline[3]).normalize();
-                coordmap[CO_BL][FC_BL] = outline[3];
-                coordmap[CO_BL][FC_TL] = vec2(coordmap[CO_BL][FC_BL]).add(vec2(projdir[1]).mul(screenborder));
-                coordmap[CO_BL][FC_BR] = vec2(coordmap[CO_BL][FC_BL]).add(vec2(projdir[0]).mul(screenborder));
-                coordmap[CO_BL][FC_TR] = vec2(coordmap[CO_BL][FC_BR]).add(vec2(projdir[1]).mul(screenborder));
-                tcoordmap[CO_BL][FC_TL] = vec2(0, 1-texborder);
-                tcoordmap[CO_BL][FC_TR] = vec2(texborder, 1-texborder);
-                tcoordmap[CO_BL][FC_BR] = vec2(texborder, 1);
-                tcoordmap[CO_BL][FC_BL] = vec2(0, 1);
-
-                // bottom right
-                projdir[0] = vec2(outline[3]).sub(outline[2]).normalize();
-                projdir[1] = vec2(outline[1]).sub(outline[2]).normalize();
-                coordmap[CO_BR][FC_BR] = outline[2];
-                coordmap[CO_BR][FC_TR] = vec2(coordmap[CO_BR][FC_BR]).add(vec2(projdir[1]).mul(screenborder));
-                coordmap[CO_BR][FC_BL] = vec2(coordmap[CO_BR][FC_BR]).add(vec2(projdir[0]).mul(screenborder));
-                coordmap[CO_BR][FC_TL] = vec2(coordmap[CO_BR][FC_BL]).add(vec2(projdir[1]).mul(screenborder));
-                tcoordmap[CO_BR][FC_TL] = vec2(1-texborder, 1-texborder);
-                tcoordmap[CO_BR][FC_TR] = vec2(1, 1-texborder);
-                tcoordmap[CO_BR][FC_BR] = vec2(1, 1);
-                tcoordmap[CO_BR][FC_BL] = vec2(1-texborder, 1);
-
-                // bottom center
-                coordmap[CO_BC][FC_TL] = coordmap[CO_BL][FC_TR];
-                coordmap[CO_BC][FC_TR] = coordmap[CO_BR][FC_TL];
-                coordmap[CO_BC][FC_BR] = coordmap[CO_BR][FC_BL];
-                coordmap[CO_BC][FC_BL] = coordmap[CO_BL][FC_BR];
-                tcoordmap[CO_BC][FC_TL] = vec2(texborder, 1-texborder);
-                tcoordmap[CO_BC][FC_TR] = vec2(1-texborder, 1-texborder);
-                tcoordmap[CO_BC][FC_BR] = vec2(1-texborder, 1);
-                tcoordmap[CO_BC][FC_BL] = vec2(texborder, 1);
-
-                // middle left
-                coordmap[CO_ML][FC_TL] = coordmap[CO_TL][FC_BL];
-                coordmap[CO_ML][FC_TR] = coordmap[CO_TL][FC_BR];
-                coordmap[CO_ML][FC_BR] = coordmap[CO_BL][FC_TR];
-                coordmap[CO_ML][FC_BL] = coordmap[CO_BL][FC_TL];
-                tcoordmap[CO_ML][FC_TL] = vec2(0, texborder);
-                tcoordmap[CO_ML][FC_TR] = vec2(texborder, texborder);
-                tcoordmap[CO_ML][FC_BR] = vec2(texborder, 1-texborder);
-                tcoordmap[CO_ML][FC_BL] = vec2(0, 1-texborder);
-
-                // middle right
-                coordmap[CO_MR][FC_TL] = coordmap[CO_TR][FC_BL];
-                coordmap[CO_MR][FC_TR] = coordmap[CO_TR][FC_BR];
-                coordmap[CO_MR][FC_BR] = coordmap[CO_BR][FC_TR];
-                coordmap[CO_MR][FC_BL] = coordmap[CO_BR][FC_TL];
-                tcoordmap[CO_MR][FC_TL] = vec2(1-texborder, texborder);
-                tcoordmap[CO_MR][FC_TR] = vec2(1, texborder);
-                tcoordmap[CO_MR][FC_BR] = vec2(1, 1-texborder);
-                tcoordmap[CO_MR][FC_BL] = vec2(1-texborder, 1-texborder);
-
-                // middle center
-                coordmap[CO_MC][FC_TL] = coordmap[CO_TL][FC_BR];
-                coordmap[CO_MC][FC_TR] = coordmap[CO_TR][FC_BL];
-                coordmap[CO_MC][FC_BR] = coordmap[CO_BR][FC_TL];
-                coordmap[CO_MC][FC_BL] = coordmap[CO_BL][FC_TR];
-                tcoordmap[CO_MC][FC_TL] = vec2(texborder, texborder);
-                tcoordmap[CO_MC][FC_TR] = vec2(1-texborder, texborder);
-                tcoordmap[CO_MC][FC_BR] = vec2(1-texborder, 1-texborder);
-                tcoordmap[CO_MC][FC_BL] = vec2(1-texborder, texborder);
-
-                if(!shading && colors.length() >= 2)
-                {
-                    static const int drawmap[2][CO_MAX] = {
-                        { CO_TL, CO_ML, CO_BL, CO_TC, CO_MC, CO_BC, CO_TR, CO_MR, CO_BR }, // VERTICAL
-                        { CO_TL, CO_TC, CO_TR, CO_ML, CO_MC, CO_MR, CO_BL, CO_BC, CO_BR }  // HORIZONTAL
-                    };
-                    loopi(3) loopj(3)
+                    int index = (i*3)+j, target = drawmap[dir][index], colstart = 0, colcount = 0;
+                    switch(j)
                     {
-                        int index = (i*3)+j, target = drawmap[dir][index], colstart = 0, colcount = 0;
-                        switch(j)
-                        {
-                            case 0: colstart = 0; colcount = 1; break;
-                            case 1: colstart = 0; colcount = colors.length(); break;
-                            case 2: colstart = colors.length()-1; colcount = 1; break;
-                        }
-                        drawmapped(gx, gy, coordmap[target], tcoordmap[target], colstart, colcount, j == 0);
+                        case 0: colstart = 0; colcount = 1; break;
+                        case 1: colstart = 0; colcount = colors.length(); break;
+                        case 2: colstart = colors.length()-1; colcount = 1; break;
                     }
+                    drawmapped(sx, sy, coordmap[target], tcoordmap[target], colstart, colcount, j == 0);
                 }
-                else loopi(CO_MAX) drawmapped(gx, gy, coordmap[i], tcoordmap[i], shading ? -1 : 0, 0, false, shading);
             }
+            else loopi(CO_MAX) drawmapped(sx, sy, coordmap[i], tcoordmap[i]);
+
             Object::draw(sx, sy);
         }
     };
@@ -4452,7 +2492,7 @@ namespace UI
     #define UIBIMGCMDS(name, value) \
         ICOMMAND(0, uiborderedimage##name, "siitfffe", (char *texname, int *c, int *a, tagval *texborder, float *screenborder, float *minw, float *minh, uint *children), \
             BUILD(BorderedImage, o, { \
-                Texture *tex = textureload(texname, value, true, false, texgc); \
+                Texture *tex = textureload(texname, value, true, false); \
                 o->setup(tex, Color(*c), *a!=0, \
                     parsepixeloffset(texborder, tex->xs), \
                     *screenborder*uiscale, *minw*uiscale, *minh*uiscale); \
@@ -4467,9 +2507,9 @@ namespace UI
     {
         float tilew, tileh;
 
-        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, float tilew_ = 0, float tileh_ = 0, bool outline_ = false, float shadowsize_ = 0.f)
+        void setup(Texture *tex_, const Color &color_, bool alphatarget_ = false, float minw_ = 0, float minh_ = 0, float tilew_ = 0, float tileh_ = 0)
         {
-            Image::setup(tex_, color_, alphatarget_, minw_, minh_, outline_, shadowsize_);
+            Image::setup(tex_, color_, alphatarget_, minw_, minh_);
             tilew = tilew_;
             tileh = tileh_;
         }
@@ -4487,31 +2527,21 @@ namespace UI
         {
             if(tex == notexture) { Object::draw(sx, sy); return; }
 
-            float gs = fabs(shadowsize), gw = max(w-(shadowsize != 0 ? float(gs) : 0.f), 0.f), gh = max(h-(shadowsize != 0 ? float(gs) : 0.f), 0.f);
-            loopk(shadowsize != 0 ? 2 : 1)
+            bindtex();
+
+            if(tex->clamp)
             {
-                bool shading = shadowsize != 0 && !k;
-                float gx = sx, gy = sy;
-                if((shadowsize > 0 && !k) || (shadowsize < 0 && k))
+                for(float dy = 0; dy < h; dy += tileh)
                 {
-                    gx += gs;
-                    gy += gs;
-                }
-                bindtex(GL_QUADS, shading ? -1 : 0, false, !shading && outline);
-                if(tex->tclamp)
-                {
-                    for(float dy = 0; dy < gh; dy += tileh)
+                    float dh = min(tileh, h - dy);
+                    for(float dx = 0; dx < w; dx += tilew)
                     {
-                        float dh = min(tileh, gh - dy);
-                        for(float dx = 0; dx < gw; dx += tilew)
-                        {
-                            float dw = min(tilew, gw - dx);
-                            quads(gx + dx, gy + dy, dw, dh, 0, 0, dw / tilew, dh / tileh);
-                        }
+                        float dw = min(tilew, w - dx);
+                        quads(sx + dx, sy + dy, dw, dh, 0, 0, dw / tilew, dh / tileh);
                     }
                 }
-                else quads(gx, gy, gw, gh, 0, 0, w/tilew, h/tileh);
             }
+            else quads(sx, sy, w, h, 0, 0, w/tilew, h/tileh);
 
             Object::draw(sx, sy);
         }
@@ -4519,86 +2549,16 @@ namespace UI
 
     #define UITIMGCMDS(name, value) \
         ICOMMAND(0, uitiledimage##name, "siiffffe", (char *texname, int *c, int *a, float *tilew, float *tileh, float *minw, float *minh, uint *children), \
-            BUILD(TiledImage, o, o->setup(textureload(texname, value, true, false, texgc), Color(*c), *a!=0, *minw*uiscale, *minh*uiscale, *tilew <= 0 ? 1 : *tilew, *tileh <= 0 ? 1 : *tileh), children));
+            BUILD(TiledImage, o, o->setup(textureload(texname, value, true, false), Color(*c), *a!=0, *minw*uiscale, *minh*uiscale, *tilew <= 0 ? 1 : *tilew, *tileh <= 0 ? 1 : *tileh), children));
 
     UITIMGCMDS(, 3);
     UITIMGCMDS(clamped, 0x7000);
     UIARG(TiledImage, image, tilew, "f", float, FVAR_NONZERO, FVAR_MAX);
     UIARG(TiledImage, image, tileh, "f", float, FVAR_NONZERO, FVAR_MAX);
 
-    struct Thumbnail : Target
-    {
-        static Color lastcolor;
-        Texture *t;
-
-        Thumbnail() : t(NULL) {}
-
-        void setup(Texture *_t, float minw_ = 0, float minh_ = 0)
-        {
-            Target::setup(minw_, minh_, Color(colourwhite));
-            t = _t;
-        }
-
-        static const char *typestr() { return "#Thumbnail"; }
-        const char *gettype() const { return typestr(); }
-
-        void startdraw()
-        {
-            lastcolor = Color(0, 0, 0, 0);
-        }
-
-        void draw(float sx, float sy)
-        {
-            if(!t || t == notexture)
-            {
-                Object::draw(sx, sy);
-                return;
-            }
-
-            setupdraw();
-
-            Color c = colors[0];
-            if(lastcolor != c)
-            {
-                lastcolor = c;
-                c.init();
-            }
-
-            vec2 tc[4] = { vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1) };
-            float xt = min(1.0f, t->xs/float(t->ys)), yt = min(1.0f, t->ys/float(t->xs));
-            float xoff = (1.0f - xt) * 0.5f, yoff = (1.0f - yt) * 0.5f;
-            loopk(4) { tc[k].x = (tc[k].x - xoff)/xt; tc[k].y = (tc[k].y - yoff)/yt; }
-
-            settexture(t);
-            quad(sx, sy, w, h, tc);
-
-            Object::draw(sx, sy);
-        }
-    };
-
-    Color Thumbnail::lastcolor(255, 255, 255);
-
-    ICOMMAND(0, uithumbnailunclamped, "sffe", (char *texname, float *minw, float *minh, uint *children),
-    {
-        Texture *t = loadthumbnail(texname, 0);
-        BUILD(Thumbnail, o, o->setup(t, *minw*uiscale, *minh*uiscale), children);
-    });
-
-    ICOMMAND(0, uithumbnail, "sffe", (char *texname, float *minw, float *minh, uint *children),
-    {
-        Texture *t = loadthumbnail(texname, 3);
-        BUILD(Thumbnail, o, o->setup(t, *minw*uiscale, *minh*uiscale), children);
-    });
-
-    ICOMMAND(0, uithumbnailclamped, "sffe", (char *texname, float *minw, float *minh, uint *children),
-    {
-        Texture *t = loadthumbnail(texname, 0x7000);
-        BUILD(Thumbnail, o, o->setup(t, *minw*uiscale, *minh*uiscale), children);
-    });
-
     struct Shape : Target
     {
-        void setup(const Color &color_, int type_ = -1, float minw_ = 0, float minh_ = 0)
+        void setup(const Color &color_, int type_ = SOLID, float minw_ = 0, float minh_ = 0)
         {
             Target::setup(minw_, minh_, color_, type_);
         }
@@ -4614,7 +2574,7 @@ namespace UI
     {
         vec2 a, b, c;
 
-        void setup(const Color &color_, float w = 0, float h = 0, int angle = 0, int type_ = -1)
+        void setup(const Color &color_, float w = 0, float h = 0, int angle = 0, int type_ = SOLID)
         {
             a = vec2(0, -h*2.0f/3);
             b = vec2(-w/2, h/3);
@@ -4650,7 +2610,8 @@ namespace UI
         {
             Object::draw(sx, sy);
 
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_SHADER | CHANGE_COLOR | CHANGE_BLEND);
+            if(type==MODULATE) modblend(); else resetblend();
 
             colors[0].init();
             gle::begin(type == OUTLINED ? GL_LINE_LOOP : GL_TRIANGLES);
@@ -4662,7 +2623,7 @@ namespace UI
     };
 
     ICOMMAND(0, uitriangle, "iffie", (int *c, float *minw, float *minh, int *angle, uint *children),
-        BUILD(Triangle, o, o->setup(Color(*c), *minw*uiscale, *minh*uiscale, *angle), children));
+        BUILD(Triangle, o, o->setup(Color(*c), *minw*uiscale, *minh*uiscale, *angle, Triangle::SOLID), children));
 
     ICOMMAND(0, uitriangleoutline, "iffie", (int *c, float *minw, float *minh, int *angle, uint *children),
         BUILD(Triangle, o, o->setup(Color(*c), *minw*uiscale, *minh*uiscale, *angle, Triangle::OUTLINED), children));
@@ -4674,7 +2635,7 @@ namespace UI
     {
         float radius;
 
-        void setup(const Color &color_, float size, int type_ = -1)
+        void setup(const Color &color_, float size, int type_ = SOLID)
         {
             Shape::setup(color_, type_, size, size);
 
@@ -4695,7 +2656,8 @@ namespace UI
         {
             Object::draw(sx, sy);
 
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_SHADER | CHANGE_COLOR | CHANGE_BLEND);
+            if(type==MODULATE) modblend(); else resetblend();
 
             float r = radius <= 0 ? min(w, h)/2 : radius;
             colors[0].init();
@@ -4725,7 +2687,7 @@ namespace UI
     };
 
     ICOMMAND(0, uicircle, "ife", (int *c, float *size, uint *children),
-        BUILD(Circle, o, o->setup(Color(*c), *size*uiscale), children));
+        BUILD(Circle, o, o->setup(Color(*c), *size*uiscale, Circle::SOLID), children));
 
     ICOMMAND(0, uicircleoutline, "ife", (int *c, float *size, uint *children),
         BUILD(Circle, o, o->setup(Color(*c), *size*uiscale, Circle::OUTLINED), children));
@@ -4733,13 +2695,17 @@ namespace UI
     ICOMMAND(0, uimodcircle, "ife", (int *c, float *size, uint *children),
         BUILD(Circle, o, o->setup(Color(*c), *size*uiscale, Circle::MODULATE), children));
 
+    #define SETSTR(dst, src) do { \
+        if(dst) { if(dst != src && strcmp(dst, src)) { delete[] dst; dst = newstring(src); } } \
+        else dst = newstring(src); \
+    } while(0)
+
     struct Text : Colored
     {
         float scale, wrap, tw, th, wlen, limit, rescale, growth;
         int align, pos, rotate;
-        bool modcol;
 
-        void setup(float scale_ = 1, const Color &color_ = Color(colourwhite), float wrap_ = 0, float limit_ = 0, int align_ = 0, int pos_ = -1, float growth_ = 1, int rotate_ = 0, bool modcol_ = false)
+        void setup(float scale_ = 1, const Color &color_ = Color(colourwhite), float wrap_ = 0, float limit_ = 0, int align_ = 0, int pos_ = -1, float growth_ = 1, int rotate_ = 0)
         {
             Colored::setup(color_);
             tw = th = wlen = 0;
@@ -4751,7 +2717,6 @@ namespace UI
             pos = pos_;
             growth = growth_;
             rotate = rotate_;
-            modcol = modcol_;
         }
 
         static const char *typestr() { return "#Text"; }
@@ -4764,20 +2729,19 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_COLOR);
 
             float k = drawscale(rescale), left = sx/k, top = sy/k;
-            int flags = modcol ? TEXT_MODCOL : 0;
+            int a = TEXT_MODCOL;
             switch(align)
             {
-                case -2:    flags |= TEXT_NO_INDENT|TEXT_LEFT_JUSTIFY; break;
-                case -1:    flags |= TEXT_LEFT_JUSTIFY; break;
-                case 0:     flags |= TEXT_CENTERED; left += tw*k*0.5f; break;
-                case 1:     flags |= TEXT_RIGHT_JUSTIFY; left += tw*k; break;
-                case 2:     flags |= TEXT_NO_INDENT|TEXT_RIGHT_JUSTIFY; left += tw*k; break;
+                case -2:    a |= TEXT_NO_INDENT|TEXT_LEFT_JUSTIFY; break;
+                case -1:    a |= TEXT_LEFT_JUSTIFY; break;
+                case 0:     a |= TEXT_CENTERED; left += tw*k*0.5f; break;
+                case 1:     a |= TEXT_RIGHT_JUSTIFY; left += tw*k; break;
+                case 2:     a |= TEXT_NO_INDENT|TEXT_RIGHT_JUSTIFY; left += tw*k; break;
             }
             if(rescale != 1) top += (((th*drawscale())-(th*k))*0.5f)/k;
-            //if(rescale != 1) top += (th-(th*rescale))*0.5f;
             if(growth < 0) top += th-(th/(0-growth));
             if(rotate == 1 || rotate == 2) left += tw;
             if(rotate == 2 || rotate == 3) top += th;
@@ -4787,9 +2751,7 @@ namespace UI
             hudmatrix.translate(left, top, 0);
             if(rotate) hudmatrix.rotate_around_z(rotate*90*RAD);
             flushhudmatrix();
-            textshader = hudtextshader;
-            draw_text(getstr(), 0, 0, colors[0].val.r, colors[0].val.g, colors[0].val.b, colors[0].val.a, flags, pos, wlen, 1);
-            textshader = NULL;
+            draw_text(getstr(), 0, 0, colors[0].r, colors[0].g, colors[0].b, colors[0].a, a, pos, wlen, 1);
             pophudmatrix();
 
             Object::draw(sx, sy);
@@ -4804,45 +2766,35 @@ namespace UI
             else if(wrap < 0)
             {
                 float wp = 0.f;
-                wlen = 0 - wrap;
+                wlen = 0-wrap;
                 for(Object *o = this->parent; o != NULL; o = o->parent)
                 {
                     if(o->istype<Padder>())
                     {
-                        wp += ((Padder *)o)->left + ((Padder *)o)->right;
+                        wp += ((Padder *)o)->left+((Padder *)o)->right;
                         continue;
                     }
                     float ww = o->w;
                     if(o->isfill()) ww = max(ww, ((Filler *)o)->minw);
-                    else if(o->istype<HorizontalList>())
-                    {
-                        HorizontalList *h = (HorizontalList *)o;
-                        loopv(o->children)
-                        {
-                            Object *p = o->children[i];
-                            if(p == this) break;
-                            ww -= p->w + h->space;
-                        }
-                    }
                     if(ww > 0)
                     {
-                        wlen *= (ww - wp)/k;
+                        wlen *= (ww-wp)/k;
                         break;
                     }
                     if(o->istype<Window>()) break;
                 }
             }
             else wlen = 0;
-            int flags = modcol ? TEXT_MODCOL : 0;
+            int a = TEXT_NO_INDENT|TEXT_MODCOL;
             switch(align)
             {
-                case -2:    flags |= TEXT_NO_INDENT|TEXT_LEFT_JUSTIFY; break;
-                case -1:    flags |= TEXT_LEFT_JUSTIFY; break;
-                case 0:     flags |= TEXT_CENTERED; break;
-                case 1:     flags |= TEXT_RIGHT_JUSTIFY; break;
-                case 2:     flags |= TEXT_NO_INDENT|TEXT_RIGHT_JUSTIFY; break;
+                case -2:    a |= TEXT_NO_INDENT|TEXT_LEFT_JUSTIFY; break;
+                case -1:    a |= TEXT_LEFT_JUSTIFY; break;
+                case 0:     a |= TEXT_CENTERED; break;
+                case 1:     a |= TEXT_RIGHT_JUSTIFY; break;
+                case 2:     a |= TEXT_NO_INDENT|TEXT_RIGHT_JUSTIFY; break;
             }
-            text_boundsf(getstr(), tw, th, 0, 0, wlen, flags);
+            text_boundsf(getstr(), tw, th, 0, 0, wlen, a);
             if(rotate%2) { int rw = tw; tw = th; th = rw; }
             rescale = 1;
             if(limit < 0)
@@ -4872,7 +2824,7 @@ namespace UI
                 }
             }
             if(growth != 1) th *= growth > 0 ? growth : 0-growth;
-            w = max(w, tw*k*min(rescale, 1.f));
+            w = max(w, tw*k*rescale);
             h = max(h, th*k);
         }
     };
@@ -4884,7 +2836,6 @@ namespace UI
     UIARGT(Text, text, align, "i", int, -2, 2);
     UIARGT(Text, text, pos, "i", int, -1, VAR_MAX);
     UIARGT(Text, text, rotate, "i", int, 0, 3);
-    UIARGTB(Text, text, modcol);
 
     struct TextString : Text
     {
@@ -4902,7 +2853,6 @@ namespace UI
 
         static const char *typestr() { return "#TextString"; }
         const char *gettype() const { return typestr(); }
-        bool istext() const { return true; }
 
         const char *getstr() const { return str; }
     };
@@ -4923,7 +2873,6 @@ namespace UI
 
         static const char *typestr() { return "#TextInt"; }
         const char *gettype() const { return typestr(); }
-        bool istext() const { return true; }
 
         const char *getstr() const { return str; }
     };
@@ -4944,7 +2893,6 @@ namespace UI
 
         static const char *typestr() { return "#TextFloat"; }
         const char *gettype() const { return typestr(); }
-        bool istext() const { return true; }
 
         const char *getstr() const { return str; }
     };
@@ -4976,117 +2924,101 @@ namespace UI
         }
     }
 
+    ICOMMAND(0, uitextfill, "ffe", (float *minw, float *minh, uint *children),
+        BUILD(Filler, o, o->setup(*minw*uiscale * uitextscale*0.5f, *minh*uiscale * uitextscale), children));
+
     ICOMMAND(0, uitext, "tfe", (tagval *text, float *scale, uint *children),
         buildtext(*text, *scale, uitextscale, Color(colourwhite), children));
 
     ICOMMAND(0, uicolourtext, "tife", (tagval *text, int *c, float *scale, uint *children),
         buildtext(*text, *scale, uitextscale, Color(*c), children));
 
-    struct TexGC : Object
+    struct Font : Object
     {
+        ::font *font;
+
+        Font() : font(NULL) {}
+
+        void setup(const char *name)
+        {
+            Object::setup();
+
+            if(!font || !strcmp(font->name, name)) font = findfont(name);
+        }
+
         void layout()
         {
-            bool oldtexgx = texgc;
-            texgc = true;
-
+            pushfont(font);
             Object::layout();
-
-            texgc = oldtexgx;
+            popfont();
         }
 
         void draw(float sx, float sy)
         {
-            bool oldtexgx = texgc;
-            texgc = true;
-
+            pushfont(font);
             Object::draw(sx, sy);
-
-            texgc = oldtexgx;
+            popfont();
         }
 
         void buildchildren(uint *contents)
         {
-            bool oldtexgx = texgc;
-            texgc = true;
-
+            pushfont(font);
             Object::buildchildren(contents);
-
-            texgc = oldtexgx;
+            popfont();
         }
 
-        #define DOSTATE(chkflags, func) \
-            void func##children(float cx, float cy, bool cinside, int mask, int mode, int setflags) \
+        #define DOSTATE(flags, func) \
+            void func##children(float cx, float cy, int mask, bool inside, int setflags) \
             { \
-                if(!(allowstate&chkflags)) return; \
-                bool oldtexgx = texgc; \
-                texgc = true; \
-                Object::func##children(cx, cy, cinside, mask, mode, setflags); \
-                texgc = oldtexgx; \
+                pushfont(font); \
+                Object::func##children(cx, cy, mask, inside, setflags); \
+                popfont(); \
             }
         DOSTATES
         #undef DOSTATE
 
         bool rawkey(int code, bool isdown)
         {
-            bool oldtexgx = texgc;
-            texgc = true;
-
+            pushfont(font);
             bool result = Object::rawkey(code, isdown);
-
-            texgc = oldtexgx;
-
+            popfont();
             return result;
         }
 
         bool key(int code, bool isdown)
         {
-            bool oldtexgx = texgc;
-            texgc = true;
-
+            pushfont(font);
             bool result = Object::key(code, isdown);
-
-            texgc = oldtexgx;
-
+            popfont();
             return result;
         }
 
         bool textinput(const char *str, int len)
         {
-            bool oldtexgx = texgc;
-            texgc = true;
-
+            pushfont(font);
             bool result = Object::textinput(str, len);
-
-            texgc = oldtexgx;
-
+            popfont();
             return result;
         }
     };
 
-    ICOMMAND(0, uitexgc, "e", (uint *children),
-        BUILD(TexGC, o, o->setup(), children));
+    ICOMMAND(0, uifont, "se", (char *name, uint *children),
+        BUILD(Font, o, o->setup(name), children));
 
     struct Clipper : Object
     {
         float sizew, sizeh, virtw, virth, offsetx, offsety;
-        bool inverted, invscroll, forced;
 
-        Clipper() : offsetx(0), offsety(0), inverted(false), invscroll(false) {}
+        Clipper() : offsetx(0), offsety(0) {}
 
-        void setup(float sizew_ = 0, float sizeh_ = 0, float offsetx_ = 0, float offsety_ = 0, bool offset_ = false)
+        void setup(float sizew_ = 0, float sizeh_ = 0, float offsetx_ = -1, float offsety_ = -1)
         {
             Object::setup();
             sizew = sizew_;
             sizeh = sizeh_;
-            //if(offsetx_ >= 0) offsetx = offsetx_;
-            //if(offsety_ >= 0) offsety = offsety_;
-            if(offset_)
-            {
-                offsetx = offsetx_;
-                offsety = offsety_;
-            }
-            forced = false;
-            //virtw = virth = 0;
+            if(offsetx_ >= 0) offsetx = offsetx_;
+            if(offsety_ >= 0) offsety = offsety_;
+            virtw = virth = 0;
         }
 
         static const char *typestr() { return "#Clipper"; }
@@ -5098,8 +3030,8 @@ namespace UI
             Object::layout();
             virtw = w;
             virth = h;
-            if(sizew || forced) w = min(w, sizew);
-            if(sizeh || forced) h = min(h, sizeh);
+            if(sizew) w = min(w, sizew);
+            if(sizeh) h = min(h, sizeh);
             offsetx = min(offsetx, hlimit());
             offsety = min(offsety, vlimit());
         }
@@ -5109,40 +3041,23 @@ namespace UI
             adjustchildrento(0, 0, virtw, virth);
         }
 
-        #define DOSTATE(chkflags, func) \
-            void func##children(float cx, float cy, bool cinside, int mask, int mode, int setflags) \
+        #define DOSTATE(flags, func) \
+            void func##children(float cx, float cy, int mask, bool inside, int setflags) \
             { \
-                if(!(allowstate&chkflags)) return; \
                 cx += offsetx; \
                 cy += offsety; \
-                if(cx < virtw && cy < virth) Object::func##children(cx, cy, true, mask, mode, setflags); \
+                if(cx < virtw && cy < virth) Object::func##children(cx, cy, mask, inside, setflags); \
             }
         DOSTATES
         #undef DOSTATE
 
         void draw(float sx, float sy)
         {
-            bool isdraw = (sizew && virtw > sizew) || (sizeh && virth > sizeh);
-            if(forced || isdraw)
+            if((sizew && virtw > sizew) || (sizeh && virth > sizeh))
             {
-                float drawx = sx, drawy = sy;
-
-                if(isdraw)
-                {
-                    if(inverted)
-                    {
-                        drawx = sx - (hlimit() - offsetx);
-                        drawy = sy - (vlimit() - offsety);
-                    }
-                    else
-                    {
-                        drawx = sx - offsetx;
-                        drawy = sy - offsety;
-                    }
-                }
                 stopdrawing();
                 pushclip(sx, sy, w, h);
-                Object::draw(drawx, drawy);
+                Object::draw(sx - offsetx, sy - offsety);
                 stopdrawing();
                 popclip();
             }
@@ -5156,46 +3071,36 @@ namespace UI
         float hscale() const { return w / max(virtw, w); }
         float vscale() const { return h / max(virth, h); }
 
-        void addhscroll(float hscroll) { sethscroll(offsetx + (hscroll * (invscroll ? 1 : -1))); }
-        void addvscroll(float vscroll) { setvscroll(offsety + (vscroll * (invscroll ? -1 : 1))); }
+        void addhscroll(float hscroll) { sethscroll(offsetx + hscroll); }
+        void addvscroll(float vscroll) { setvscroll(offsety + vscroll); }
         void sethscroll(float hscroll) { offsetx = clamp(hscroll, 0.0f, hlimit()); }
         void setvscroll(float vscroll) { offsety = clamp(vscroll, 0.0f, vlimit()); }
     };
 
-    ICOMMAND(0, uiclip, "ffffe", (float *sizew, float *sizeh, float *offsetx, float *offsety, uint *children),
-        BUILD(Clipper, o, o->setup(*sizew*uiscale, *sizeh*uiscale, *offsetx*uiscale, *offsety*uiscale, true), children));
+    ICOMMAND(0, uiclip, "ffgge", (float *sizew, float *sizeh, float *offsetx, float *offsety, uint *children),
+        BUILD(Clipper, o, o->setup(*sizew*uiscale, *sizeh*uiscale, *offsetx*uiscale, *offsety*uiscale), children));
 
     UIARGSCALEDT(Clipper, clip, sizew, "f", float, 0.f, FVAR_MAX);
     UIARGSCALEDT(Clipper, clip, sizeh, "f", float, 0.f, FVAR_MAX);
-    UIARGSCALEDT(Clipper, clip, virtw, "f", float, 0.f, FVAR_MAX);
-    UIARGSCALEDT(Clipper, clip, virth, "f", float, 0.f, FVAR_MAX);
     UIARGSCALEDT(Clipper, clip, offsetx, "f", float, FVAR_MIN, FVAR_MAX);
     UIARGSCALEDT(Clipper, clip, offsety, "f", float, FVAR_MIN, FVAR_MAX);
-    UIARGTB(Clipper, clip, inverted);
-    UIARGTB(Clipper, clip, invscroll);
-    UIARGTB(Clipper, clip, forced);
 
     struct Scroller : Clipper
     {
-        bool disabled;
-
         void setup(float sizew_ = 0, float sizeh_ = 0)
         {
             Clipper::setup(sizew_, sizeh_);
-            disabled = false;
         }
 
         static const char *typestr() { return "#Scroller"; }
         const char *gettype() const { return typestr(); }
 
-        void scrollup(float cx, float cy, bool inside);
-        void scrolldown(float cx, float cy, bool inside);
-        bool canscroll() const { return !disabled && !surface->lockscroll; }
+        void scrollup(float cx, float cy);
+        void scrolldown(float cx, float cy);
     };
 
     ICOMMAND(0, uiscroll, "ffe", (float *sizew, float *sizeh, uint *children),
         BUILD(Scroller, o, o->setup(*sizew*uiscale, *sizeh*uiscale), children));
-    UIARGB(Scroller, scroll, disabled);
 
     struct ScrollButton : Object
     {
@@ -5223,13 +3128,13 @@ namespace UI
 
         virtual void scrollto(float cx, float cy, bool closest = false) {}
 
-        void hold(float cx, float cy, bool inside)
+        void hold(float cx, float cy)
         {
             ScrollButton *button = (ScrollButton *)find(ScrollButton::typestr(), false);
             if(button && button->haschildstate(STATE_HOLD)) movebutton(button, offsetx, offsety, cx - button->x, cy - button->y);
         }
 
-        void press(float cx, float cy, bool inside)
+        void press(float cx, float cy)
         {
             ScrollButton *button = (ScrollButton *)find(ScrollButton::typestr(), false);
             if(button && button->haschildstate(STATE_PRESS)) { offsetx = cx - button->x; offsety = cy - button->y; }
@@ -5241,29 +3146,27 @@ namespace UI
         void addscroll(float dir)
         {
             Scroller *scroller = (Scroller *)findsibling(Scroller::typestr());
-            if(scroller && scroller->canscroll()) addscroll(scroller, dir);
+            if(scroller) addscroll(scroller, dir);
         }
 
-        void arrowscroll(float dir) { addscroll(dir*uicurtime/1000.0f); }
+        void arrowscroll(float dir) { addscroll(dir*curtime/1000.0f); }
         void wheelscroll(float step);
         virtual int wheelscrolldirection() const { return 1; }
 
-        void scrollup(float cx, float cy, bool inside) { wheelscroll(-wheelscrolldirection()); }
-        void scrolldown(float cx, float cy, bool inside) { wheelscroll(wheelscrolldirection()); }
+        void scrollup(float cx, float cy) { wheelscroll(-wheelscrolldirection()); }
+        void scrolldown(float cx, float cy) { wheelscroll(wheelscrolldirection()); }
 
         virtual void movebutton(Object *o, float fromx, float fromy, float tox, float toy) = 0;
     };
 
-    void Scroller::scrollup(float cx, float cy, bool inside)
+    void Scroller::scrollup(float cx, float cy)
     {
-        if(!canscroll()) return;
         ScrollBar *scrollbar = (ScrollBar *)findsibling(ScrollBar::typestr());
         if(scrollbar) scrollbar->wheelscroll(-scrollbar->wheelscrolldirection());
     }
 
-    void Scroller::scrolldown(float cx, float cy, bool inside)
+    void Scroller::scrolldown(float cx, float cy)
     {
-        if(!canscroll()) return;
         ScrollBar *scrollbar = (ScrollBar *)findsibling(ScrollBar::typestr());
         if(scrollbar) scrollbar->wheelscroll(scrollbar->wheelscrolldirection());
     }
@@ -5281,7 +3184,7 @@ namespace UI
         static const char *typestr() { return "#ScrollArrow"; }
         const char *gettype() const { return typestr(); }
 
-        void hold(float cx, float cy, bool inside)
+        void hold(float cx, float cy)
         {
             ScrollBar *scrollbar = (ScrollBar *)findsibling(ScrollBar::typestr());
             if(scrollbar) scrollbar->arrowscroll(speed);
@@ -5317,9 +3220,7 @@ namespace UI
             if(!button) return;
             float bscale = (w - button->w) / (1 - scroller->hscale()),
                   offset = bscale > 1e-3f ? (closest && cx >= button->x + button->w ? cx - button->w : cx)/bscale : 0;
-
-            if(scroller->inverted) scroller->sethscroll(scroller->hlimit() - (offset*scroller->virtw));
-            else scroller->sethscroll(offset*scroller->virtw);
+            scroller->sethscroll(offset*scroller->virtw);
         }
 
         void adjustchildren()
@@ -5331,10 +3232,7 @@ namespace UI
             float bw = w*scroller->hscale();
             button->w = max(button->w, bw);
             float bscale = scroller->hscale() < 1 ? (w - button->w) / (1 - scroller->hscale()) : 1;
-
-            if(scroller->inverted) button->x = ((1 - scroller->hoffset())*bscale) - button->w;
-            else button->x = scroller->hoffset()*bscale;
-
+            button->x = scroller->hoffset()*bscale;
             button->adjust &= ~ALIGN_HMASK;
 
             ScrollBar::adjustchildren();
@@ -5367,9 +3265,7 @@ namespace UI
             if(!button) return;
             float bscale = (h - button->h) / (1 - scroller->vscale()),
                   offset = bscale > 1e-3f ? (closest && cy >= button->y + button->h ? cy - button->h : cy)/bscale : 0;
-
-            if(scroller->inverted) scroller->setvscroll(scroller->vlimit() - (offset*scroller->virth));
-            else scroller->setvscroll(offset*scroller->virth);
+            scroller->setvscroll(offset*scroller->virth);
         }
 
         void adjustchildren()
@@ -5381,10 +3277,7 @@ namespace UI
             float bh = h*scroller->vscale();
             button->h = max(button->h, bh);
             float bscale = scroller->vscale() < 1 ? (h - button->h) / (1 - scroller->vscale()) : 1;
-
-            if(scroller->inverted) button->y = ((1 - scroller->voffset())*bscale) - button->h;
-            else button->y = scroller->voffset()*bscale;
-
+            button->y = scroller->voffset()*bscale;
             button->adjust &= ~ALIGN_VMASK;
 
             ScrollBar::adjustchildren();
@@ -5512,12 +3405,12 @@ namespace UI
         void wheelscroll(float step);
         virtual int wheelscrolldirection() const { return 1; }
 
-        void scrollup(float cx, float cy, bool inside) { wheelscroll(-wheelscrolldirection()); }
-        void scrolldown(float cx, float cy, bool inside) { wheelscroll(wheelscrolldirection()); }
+        void scrollup(float cx, float cy) { wheelscroll(-wheelscrolldirection()); }
+        void scrolldown(float cx, float cy) { wheelscroll(wheelscrolldirection()); }
 
         virtual void scrollto(float cx, float cy) {}
 
-        void hold(float cx, float cy, bool inside)
+        void hold(float cx, float cy)
         {
             scrollto(cx, cy);
         }
@@ -5545,19 +3438,19 @@ namespace UI
         static const char *typestr() { return "#SliderArrow"; }
         const char *gettype() const { return typestr(); }
 
-        void press(float cx, float cy, bool inside)
+        void press(float cx, float cy)
         {
-            laststep = uitotalmillis + 2*uislidersteptime;
+            laststep = totalmillis + 2*uislidersteptime;
 
             Slider *slider = (Slider *)findsibling(Slider::typestr());
             if(slider) slider->arrowscroll(stepdir);
         }
 
-        void hold(float cx, float cy, bool inside)
+        void hold(float cx, float cy)
         {
-            if(uitotalmillis < laststep + uislidersteptime)
+            if(totalmillis < laststep + uislidersteptime)
                 return;
-            laststep = uitotalmillis;
+            laststep = totalmillis;
 
             Slider *slider = (Slider *)findsibling(Slider::typestr());
             if(slider) slider->arrowscroll(stepdir);
@@ -5640,79 +3533,55 @@ namespace UI
 
     struct TextEditor : Colored
     {
+        static TextEditor *focus;
+
         float scale, offsetx, offsety;
         editor *edit;
         char *keyfilter;
-        bool canfocus, allowlines, wasfocus;
 
-        TextEditor() : edit(NULL), keyfilter(NULL), canfocus(true), allowlines(true) {}
+        TextEditor() : edit(NULL), keyfilter(NULL) {}
 
         bool iseditor() const { return true; }
 
-        void setup(const char *name, int length, int height, float scale_ = 1, const char *initval = NULL, int mode = EDITORUSED, const char *keyfilter_ = NULL, bool allowlines_ = true, int limit_ = 0)
+        void setup(const char *name, int length, int height, float scale_ = 1, const char *initval = NULL, int mode = EDITORUSED, const char *keyfilter_ = NULL)
         {
             Colored::setup(Color(colourwhite));
-            edit = useeditor(name, mode, false, initval);
+            editor *edit_ = useeditor(name, mode, false, initval);
+            if(edit_ != edit)
+            {
+                if(edit) clearfocus();
+                edit = edit_;
+            }
+            else if(isfocus() && !hasstate(STATE_HOVER)) commit();
             if(initval && edit->mode == EDITORFOCUSED && !isfocus()) edit->clear(initval);
             edit->active = true;
             edit->linewrap = length < 0;
             edit->maxx = edit->linewrap ? -1 : length;
             edit->maxy = height <= 0 ? 1 : -1;
-            edit->pixelwidth = abs(length)*FONTW;
-            edit->limit = limit_;
+            edit->pixelwidth = abs(length)*FONTMW;
             if(edit->linewrap && edit->maxy == 1) edit->updateheight();
             else edit->pixelheight = FONTH*max(height, 1);
             scale = scale_;
-            if(keyfilter_ && *keyfilter_) SETSTR(keyfilter, keyfilter_);
+            if(keyfilter_) SETSTR(keyfilter, keyfilter_);
             else DELETEA(keyfilter);
-            allowlines = allowlines_;
-            wasfocus = false;
         }
-
         ~TextEditor()
         {
-            if(inputsteal == this) inputsteal = NULL;
+            clearfocus();
             DELETEA(keyfilter);
         }
 
-        void prepare()
+        static void setfocus(TextEditor *e)
         {
-            if(!inputsteal && isfocus())
-                inputsteal = this;
-            else if(wasfocus)
-            {
-                wasfocus = false;
-                if(!textfocus)
-                {
-                    ::textinput(false, TI_UI);
-                    ::keyrepeat(false, KR_UI);
-                }
-            }
-
-            Object::prepare();
+            if(focus == e) return;
+            focus = e;
+            bool allowtextinput = focus!=NULL && focus->allowtextinput();
+            ::textinput(allowtextinput, TI_UI);
+            ::keyrepeat(allowtextinput, KR_UI);
         }
-
-        void setfocus()
-        {
-            if(isfocus()) return;
-            textfocus = edit;
-            wasfocus = true;
-            ::textinput(true, TI_UI);
-            ::keyrepeat(true, KR_UI);
-        }
-
-        void setfocusable(bool focusable) { canfocus = focusable; }
-
-        void clearfocus(bool force = false)
-        {
-            if(!isfocus()) return;
-            textfocus = NULL;
-            wasfocus = false;
-            ::textinput(false, TI_UI);
-            ::keyrepeat(false, KR_UI);
-        }
-
-        bool isfocus() const { return edit && textfocus == edit; }
+        void setfocus() { setfocus(this); }
+        void clearfocus() { if(focus == this) setfocus(NULL); }
+        bool isfocus() const { return focus == this; }
 
         static const char *typestr() { return "#TextEditor"; }
         const char *gettype() const { return typestr(); }
@@ -5726,16 +3595,14 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_COLOR);
 
             edit->rendered = true;
 
             float k = drawscale();
             pushhudtranslate(sx, sy, k);
 
-            textshader = hudtextshader;
-            edit->draw(FONTW/2, 0, colors[0].val.tohexcolor(), colors[0].val.a, isfocus());
-            textshader = NULL;
+            edit->draw(FONTW/2, 0, colors[0].tohexcolor(), colors[0].a, isfocus());
 
             pophudmatrix();
 
@@ -5758,20 +3625,13 @@ namespace UI
             offsety = cy;
         }
 
-        void press(float cx, float cy, bool inside)
+        void press(float cx, float cy)
         {
-            if(!canfocus) return;
-
             setfocus();
             resetmark(cx, cy);
         }
 
-        void release(float cx, float cy, bool inside)
-        {
-            if(isfocus() && !inside) cancel();
-        }
-
-        void hold(float cx, float cy, bool inside)
+        void hold(float cx, float cy)
         {
             if(isfocus())
             {
@@ -5781,12 +3641,12 @@ namespace UI
             }
         }
 
-        void scrollup(float cx, float cy, bool inside)
+        void scrollup(float cx, float cy)
         {
             edit->scrollup();
         }
 
-        void scrolldown(float cx, float cy, bool inside)
+        void scrolldown(float cx, float cy)
         {
             edit->scrolldown();
         }
@@ -5801,11 +3661,6 @@ namespace UI
             clearfocus();
         }
 
-        void escrelease(float cx, float cy, bool inside)
-        {
-            cancel();
-        }
-
         bool key(int code, bool isdown)
         {
             if(Object::key(code, isdown)) return true;
@@ -5813,11 +3668,11 @@ namespace UI
             switch(code)
             {
                 case SDLK_ESCAPE:
-                    if(!isdown) cancel();
+                    if(isdown) cancel();
                     return true;
                 case SDLK_RETURN:
                 case SDLK_TAB:
-                    if(edit->maxy != 1 && allowlines) break;
+                    if(edit->maxy != 1) break;
                     // fall-through
                 case SDLK_KP_ENTER:
                     if(isdown) commit();
@@ -5847,17 +3702,11 @@ namespace UI
             }
             return true;
         }
-
-        int count() const { return isfocus() && edit ? edit->len : -1; }
     };
 
-    ICOMMAND(0, uitexteditor, "siifsies", (char *name, int *length, int *height, float *scale, char *initval, int *mode, uint *children, char *keyfilter),
-        BUILD(TextEditor, o, o->setup(name, *length, *height, (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale, initval, *mode <= 0 ? EDITORFOREVER : *mode, keyfilter), children));
-
-    UICMDT(TextEditor, editor, isfocus, "", (), intret(o->isfocus()));
-    UICMDT(TextEditor, editor, setfocus, "", (), o->setfocus());
-    UICMDT(TextEditor, editor, setfocusable, "i", (int *focusable), o->setfocusable(*focusable));
-    UICMDT(TextEditor, editor, getcount, "", (), intret(o->count()));
+    TextEditor *TextEditor::focus = NULL;
+    ICOMMAND(0, uitexteditor, "siifsie", (char *name, int *length, int *height, float *scale, char *initval, int *mode, uint *children),
+        BUILD(TextEditor, o, o->setup(name, *length, *height, (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale, initval, *mode <= 0 ? EDITORFOREVER : *mode, NULL), children));
 
     static const char *getsval(ident *id, bool &shouldfree, const char *val = "")
     {
@@ -5898,8 +3747,9 @@ namespace UI
 
         Field() : id(NULL), changed(false) {}
 
-        void setup(ident *id_, int length, uint *onchange, float scale = 1, const char *keyfilter_ = NULL, bool immediate = false, int height = 0, int limit = 0)
+        void setup(ident *id_, int length, uint *onchange, float scale = 1, const char *keyfilter_ = NULL, bool immediate = false)
         {
+            if(isfocus() && !hasstate(STATE_HOVER)) commit();
             if(isfocus() && immediate && edit && id == id_)
             {
                 bool shouldfree = false;
@@ -5914,10 +3764,9 @@ namespace UI
             }
             bool shouldfree = false;
             const char *initval = id != id_ || !isfocus() ? getsval(id_, shouldfree) : NULL;
-            TextEditor::setup(id_->name, length, height, scale, initval, EDITORFOCUSED, keyfilter_, false, limit);
+            TextEditor::setup(id_->name, length, 0, scale, initval, EDITORFOCUSED, keyfilter_);
             if(shouldfree) delete[] initval;
             id = id_;
-            edit->linewrapmark = false;
         }
 
         static const char *typestr() { return "#Field"; }
@@ -5936,120 +3785,13 @@ namespace UI
         }
     };
 
-    ICOMMAND(0, uifield, "riefies", (ident *var, int *length, uint *onchange, float *scale, int *immediate, uint *children, char *keyfilter),
-        BUILD(Field, o, o->setup(var, *length, onchange, (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale, keyfilter, *immediate!=0), children));
-
-    ICOMMAND(0, uimlfield, "riiiefies", (ident *var, int *length, int *height, int *limit, uint *onchange, float *scale, int *immediate, uint *children, char *keyfilter),
-        BUILD(Field, o, o->setup(var, *length, onchange, (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale, keyfilter, *immediate!=0, *height, *limit), children));
-
-    struct KeyCatcher : Target
-    {
-        static KeyCatcher *focus;
-
-        ident *id;
-        int pressedkey;
-
-        // Workaround to prevent the focusing event from being treated as a keypress
-        int focusmillis, keymillis;
-
-        KeyCatcher() : id(NULL), pressedkey(0) {}
-        ~KeyCatcher() { if(inputsteal == this) inputsteal = NULL; }
-
-        bool iskeycatcher() const { return true; }
-
-        static const char *typestr() { return "#KeyCatcher"; }
-        const char *gettype() const { return typestr(); }
-
-        bool target(float cx, float cy) { return true; }
-
-        void setup(ident *id_, float minw, float minh, uint *onkey)
-        {
-            Target::setup(minw, minh);
-
-            id = id_;
-            if(isfocus() && pressedkey && keymillis > focusmillis)
-            {
-                setsval(id, getkeyname(pressedkey), onkey);
-                pressedkey = 0;
-                clearfocus();
-            }
-        }
-
-        void prepare()
-        {
-            if(!inputsteal && isfocus()) inputsteal = this;
-
-            Object::prepare();
-        }
-
-        static void setfocus(KeyCatcher *kc)
-        {
-            if(focus == kc) return;
-            focus = kc;
-            if(kc)
-            {
-                inputsteal = kc;
-                kc->focusmillis = uitotalmillis;
-            }
-        }
-        void setfocus() { setfocus(this); }
-        void clearfocus() { if(focus == this) setfocus(NULL); }
-        bool isfocus() const { return focus == this; }
-
-        void press(float cx, float cy, bool inside)
-        {
-            setfocus();
-        }
-
-        bool key(int code, bool isdown)
-        {
-            if(Object::key(code, isdown)) return true;
-            if(!isfocus()) return false;
-            switch(code)
-            {
-                case SDLK_ESCAPE:
-                    return true;
-            }
-            return true;
-        }
-
-        bool rawkey(int code, bool isdown)
-        {
-            if(Object::rawkey(code, isdown)) return true;
-            if(!isfocus() || !isdown) return false;
-            if(code == SDLK_ESCAPE) clearfocus();
-            else
-            {
-                pressedkey = code;
-                keymillis = uitotalmillis;
-            }
-            return true;
-        }
-    };
-
-    KeyCatcher *KeyCatcher::focus = NULL;
-    ICOMMAND(0, uikeycatcher, "rffee", (ident *var, float *minw, float *minh, uint *onkey,
-        uint *children),
-        BUILD(KeyCatcher, o, o->setup(var, *minw, *minh, onkey), children));
-
-    UICMDT(KeyCatcher, keycatcher, isfocus, "", (), intret(o->isfocus()));
-    UICMDT(KeyCatcher, keycatcher, setfocus, "", (), o->setfocus());
+    ICOMMAND(0, uifield, "riefie", (ident *var, int *length, uint *onchange, float *scale, int *immediate, uint *children),
+        BUILD(Field, o, o->setup(var, *length, onchange, (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale, NULL, *immediate!=0), children));
 
     struct KeyField : Field
     {
-        enum { MODE_MULTI = 0, MODE_COMBO };
-
         static const char *typestr() { return "#KeyField"; }
         const char *gettype() const { return typestr(); }
-
-        int fieldmode;
-
-        void setup(ident *id_, int length, uint *onchange, float scale = 1,
-            const char *keyfilter_ = NULL, bool immediate = false, int mode = MODE_MULTI)
-        {
-            Field::setup(id_, length, onchange, scale, keyfilter_, immediate);
-            fieldmode = mode;
-        }
 
         void resetmark(float cx, float cy)
         {
@@ -6059,35 +3801,11 @@ namespace UI
 
         void insertkey(int code)
         {
-            bool ctrl = false, shift = false, alt = false;
-
-            ctrl = code == SDLK_LCTRL || code == SDLK_RCTRL;
-            alt = code == SDLK_LALT || code == SDLK_RALT;
-            shift = code == SDLK_LSHIFT || code == SDLK_RSHIFT;
-
-            // Do not insert the modifiers themselves
-            if(fieldmode == MODE_COMBO && (ctrl || shift || alt))
-                return;
-
             const char *keyname = getkeyname(code);
             if(keyname)
             {
-                if(!edit->empty())
-                {
-                    if(fieldmode == MODE_MULTI) edit->insert(" ");
-                    else edit->clear();
-                }
-
-                if(fieldmode == MODE_COMBO)
-                {
-                    if(SDL_GetModState()&MOD_KEYS) edit->insert("CTRL+");
-                    if(SDL_GetModState()&MOD_ALTS) edit->insert("ALT+");
-                    if(SDL_GetModState()&MOD_SHIFTS) edit->insert("SHIFT+");
-                }
-
+                if(!edit->empty()) edit->insert(" ");
                 edit->insert(keyname);
-
-                if(fieldmode == MODE_COMBO) commit();
             }
         }
 
@@ -6103,238 +3821,41 @@ namespace UI
         bool allowtextinput() const { return false; }
     };
 
-    ICOMMAND(0, uikeyfield, "riefe", (ident *var, int *length, uint *onchange, float *scale,
-        uint *children),
-    {
-        float s = (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale;
-        BUILD(KeyField, o, o->setup(var, *length, onchange, s, NULL, false), children);
-    });
-
-    ICOMMAND(0, uicombokeyfield, "riefe", (ident *var, int *length, uint *onchange, float *scale,
-        uint *children),
-    {
-        float s = (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale;
-        BUILD(KeyField, o, o->setup(var, *length, onchange, s, NULL, false, KeyField::MODE_COMBO),
-            children);
-    });
-
-    struct AxisView : Filler
-    {
-        void startdraw()
-        {
-            hudnotextureshader->set();
-
-            gle::defvertex();
-            gle::defcolor();
-        }
-
-        void draw(float sx, float sy)
-        {
-            setupdraw(CHANGE_SHADER);
-
-            pushhudmatrix();
-            matrix4 axismatrix, axisprojmatrix;
-            axismatrix.identity();
-
-            axismatrix.translate(0, 0, -0.5f);
-            axismatrix.rotate_around_y(camera1->roll*RAD);
-            axismatrix.rotate_around_x((camera1->pitch+90)*-RAD);
-            axismatrix.rotate_around_z(camera1->yaw*RAD);
-
-            axisprojmatrix.perspective(25, w/h, 0.1f, 10.0f);
-            hudmatrix.muld(axisprojmatrix, axismatrix);
-            flushhudmatrix();
-
-            float hudaspect = hudw/float(hudh);
-            glViewport(hudw*sx*(1/hudaspect), hudh*(1.0f-(sy+h)), hudw*w*(1/hudaspect), hudh*h);
-
-            glLineWidth(4);
-
-            const float offset = 0.08;
-
-            const vec vbo[12][2] = {
-                { vec(0,       0,       0),       vec(0.25f, 0.25f, 0.5f ) }, // -Z
-                { vec(0,       0,       -offset), vec(0.25f, 0.25f, 0.5f ) },
-
-                { vec(0,       0,       0),       vec(0.5f,  0.25f, 0.25f) }, // -X
-                { vec(offset,  0,       0),       vec(0.5f,  0.25f, 0.25f) },
-                { vec(0,       0,       0),       vec(1,     0,     0    ) }, // X
-                { vec(-offset, 0,       0),       vec(1,     0,     0    ) },
-
-                { vec(0,       0,       0),       vec(0.25f, 0.5f,  0.25f) }, // -Y
-                { vec(0,       -offset, 0),       vec(0.25f, 0.5f,  0.25f) },
-                { vec(0,       0,       0),       vec(0,     1,     0    ) }, // Y
-                { vec(0,       offset,  0),       vec(0,     1,     0    ) },
-
-                { vec(0,       0,       0),       vec(0,     0,     1    ) }, // Z
-                { vec(0,       0,       offset),  vec(0,     0,     1    ) }
-            };
-
-            gle::begin(GL_LINES);
-
-            if(camera1->pitch > 0) loopirev(12) loopj(2) gle::attrib(vbo[i][j]);
-            else loopi(12) loopj(2) gle::attrib(vbo[i][j]);
-
-            gle::end();
-
-            glLineWidth(1);
-            glViewport(0, 0, hudw, hudh);
-
-            pophudmatrix();
-
-            Object::draw(sx, sy);
-        }
-    };
-
-    ICOMMAND(0, uiaxisview, "ffe", (float *minw, float *minh, uint *children),
-        BUILD(AxisView, o, o->setup(*minw*uiscale, *minh*uiscale), children));
-
-    struct AmmoClip : Target
-    {
-        int weap;
-
-        void setup(float weap_, float minw_, float minh_)
-        {
-            Target::setup(minw_, minh_);
-            weap = int(weap_);
-        }
-
-        void startdraw()
-        {
-            hudshader->set();
-
-            gle::defvertex();
-            gle::defcolor();
-
-            gle::colorf(1, 1, 1);
-        }
-
-        void draw(float sx, float sy)
-        {
-            setupdraw(CHANGE_SHADER);
-
-            pushhudmatrix();
-            hudmatrix.ortho(0, hud::hudwidth, hud::hudheight, 0, -1, 1);
-            flushhudmatrix();
-
-            hud::drawclip(weap, (sx / (float(hud::hudwidth)/hud::hudheight)) * hud::hudwidth, sy * hud::hudheight, hud::hudsize, true);
-
-            pophudmatrix();
-
-            Object::draw(sx, sy);
-        }
-    };
-
-    ICOMMAND(0, uiammoclip, "iffe", (int *weap, float *minw, float *minh, uint *children),
-        BUILD(AmmoClip, o, o->setup(*weap, *minw*uiscale, *minh*uiscale), children));
+    ICOMMAND(0, uikeyfield, "riefe", (ident *var, int *length, uint *onchange, float *scale, uint *children),
+        BUILD(KeyField, o, o->setup(var, *length, onchange, (*scale <= 0 ? 1 : *scale)*uiscale * uitextscale), children));
 
     struct Preview : Target
     {
-        float yaw, pitch, roll, fov;
-        vec skycol, suncol, sundir, excol, exdir, translate;
-        float offsetx, offsety, offsetyaw, offsetpitch;
-        bool dragging, interact;
-
-        Preview() { resetoffset(); }
-
-        void resetoffset() { offsetx = offsety = offsetyaw = offsetpitch = 0; dragging = false; }
-
-        void setup(float minw_ = 0, float minh_ = 0, float yaw_ = -1, float pitch_ = -15, float roll_ = 0, float fov_ = 0, const vec &skycol_ = vec(0.1f, 0.1f, 0.1f), const vec &suncol_ = vec(0.6f, 0.6f, 0.6f), const vec &sundir_ = vec(0, -1, 2), const vec &excol_ = vec(0.f, 0.f, 0.f), const vec &exdir_ = vec(0, 0, 0), const Color &color_ = Color(colourwhite))
-        {
-            Target::setup(minw_, minh_, color_);
-            yaw = yaw_;
-            pitch = pitch_;
-            roll = roll_;
-            fov = fov_;
-            skycol = skycol_;
-            suncol = suncol_;
-            sundir = sundir_;
-            excol = excol_;
-            exdir = exdir_;
-            interact = false;
-            translate = vec(0, 0, 0);
-        }
-
-        bool ispreview() const { return true; }
-
         void startdraw()
         {
             glDisable(GL_BLEND);
-            disableclip();
+
+            if(clipstack.length()) glDisable(GL_SCISSOR_TEST);
         }
 
         void enddraw()
         {
             glEnable(GL_BLEND);
-            enableclip();
-        }
 
-        void hold(float cx, float cy, bool inside)
-        {
-            if(!interact) return;
-            float rx = (cx - x) / w, ry = (cy - y) / h;
-            if(rx < 0 || rx > 1 || ry < 0 || ry > 1) return;
-            if(!dragging || rx != offsetx || ry != offsety)
-            {
-                if(dragging)
-                {
-                    float qx = offsetx - rx, qy = offsety - ry;
-                    offsetyaw += qx * 360.f;
-                    offsetpitch += qy * 180.f;
-                }
-                offsetx = rx;
-                offsety = ry;
-                dragging = true;
-            }
-        }
-
-        void release(float cx, float cy, bool inside)
-        {
-            offsetx = 0;
-            offsety = 0;
-            dragging = false;
+            if(clipstack.length()) glEnable(GL_SCISSOR_TEST);
         }
     };
-
-    UICMDT(Preview, preview, skycol, "i", (int *c), o->skycol = vec::fromcolor(*c));
-    UICMDT(Preview, preview, suncol, "i", (int *c), o->suncol = vec::fromcolor(*c));
-    UICMDT(Preview, preview, sundir, "fff", (float *x, float *y, float *z), o->sundir = vec(*x, *y, *z));
-    UICMDT(Preview, preview, excol, "i", (int *c), o->excol = vec::fromcolor(*c));
-    UICMDT(Preview, preview, exdir, "fff", (float *x, float *y, float *z), o->exdir = vec(*x, *y, *z));
-    UICMDT(Preview, preview, yaw, "f", (float *n), o->yaw = *n);
-    UICMDT(Preview, preview, pitch, "f", (float *n), o->pitch = *n);
-    UICMDT(Preview, preview, roll, "f", (float *n), o->roll = *n);
-    UICMDT(Preview, preview, fov, "f", (float *n), o->fov = *n);
-    UICMDT(Preview, preview, interact, "i", (int *c), o->interact = *c != 0);
-    UICMDT(Preview, preview, resetoffset, "", (void), o->resetoffset());
-    UICMDT(Preview, preview, translate, "fff", (float *x, float *y, float *z), o->translate = vec(*x, *y, *z));
 
     struct ModelPreview : Preview
     {
         char *name;
         modelstate mdl;
 
-        ModelPreview() : name(NULL) { resetoffset(); }
+        ModelPreview() : name(NULL) {}
         ~ModelPreview() { delete[] name; }
 
-        void setup(const char *name_, const char *animspec, float scale_, float blend_, float minw_, float minh_, float yaw_ = -1, float pitch_ = -15, float roll_ = 0, float fov_ = 20, const vec &skycol_ = vec(0.1f, 0.1f, 0.1f), const vec &suncol_ = vec(0.6f, 0.6f, 0.6f), const vec &sundir_ = vec(0, -1, 2), const vec &excol_ = vec(0.f, 0.f, 0.f), const vec &exdir_ = vec(0, 0, 0))
+        void setup(const char *name_, const char *animspec, float scale_, float blend_, float minw_, float minh_)
         {
             mdl.reset();
 
-            Preview::setup(minw_, minh_, yaw_, pitch_, roll_, fov_, skycol_, suncol_, sundir_, excol_, exdir_);
+            Preview::setup(minw_, minh_, Color(colourwhite));
             SETSTR(name, name_);
 
-            setanim(animspec);
-            mdl.size = scale_;
-            mdl.color = vec4(1, 1, 1, blend_);
-        }
-
-        static const char *typestr() { return "#ModelPreview"; }
-        const char *gettype() const { return typestr(); }
-        bool ismodelpreview() const { return true; }
-
-        void setanim(const char *animspec)
-        {
             mdl.anim = ANIM_ALL;
             if(animspec[0])
             {
@@ -6352,74 +3873,52 @@ namespace UI
                 }
             }
             mdl.anim |= ANIM_LOOP;
+            mdl.size = scale_;
+            mdl.color = vec4(1, 1, 1, blend_);
         }
+
+        static const char *typestr() { return "#ModelPreview"; }
+        const char *gettype() const { return typestr(); }
 
         void draw(float sx, float sy)
         {
-            if(!loadedshaders) { Object::draw(sx, sy); return; }
+            Object::draw(sx, sy);
 
-            setupdraw(CHANGE_SHADER);
+            if (!loadedshaders) return;
+
+            changedraw(CHANGE_SHADER);
 
             int sx1, sy1, sx2, sy2;
-            bool hasclipstack = clipstack.length() > 0;
             window->calcscissor(sx, sy, sx+w, sy+h, sx1, sy1, sx2, sy2, false);
-            modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, pitch+offsetpitch, roll, fov, false, hasclipstack, translate);
+            modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, false, clipstack.length() > 0);
             model *m = loadmodel(name);
             if(m)
             {
+                loopi(min(colors.length(), int(MAXMDLMATERIALS))) mdl.material[i] = bvec(colors[i].r, colors[i].g, colors[i].b);
                 vec center, radius;
                 m->boundbox(center, radius);
-                if(yaw >= 0) mdl.yaw = yaw;
                 mdl.o = calcmodelpreviewpos(radius, mdl.yaw).sub(center);
-                mdl.yaw += offsetyaw;
                 rendermodel(name, mdl);
             }
-            if(hasclipstack) clipstack.last().scissor();
-            modelpreview::end(renderfbo, skycol, suncol, sundir, excol, exdir);
-
-            Object::draw(sx, sy);
+            if(clipstack.length()) clipstack.last().scissor();
+            modelpreview::end();
         }
     };
 
     ICOMMAND(0, uimodelpreview, "ssffffe", (char *model, char *animspec, float *scale, float *blend, float *minw, float *minh, uint *children),
         BUILD(ModelPreview, o, o->setup(model, animspec, *scale, *blend, *minw*uiscale, *minh*uiscale), children));
 
-    UICMDT(ModelPreview, modelpreview, file, "s", (const char *s), SETSTR(o->name, s));
-    UICMDT(ModelPreview, modelpreview, anim, "s", (const char *s), o->setanim(s));
-    UICMDT(ModelPreview, modelpreview, scale, "f", (float *n), o->mdl.size = *n);
-    UICMDT(ModelPreview, modelpreview, skycol, "i", (int *c), o->skycol = vec::fromcolor(*c));
-    UICMDT(ModelPreview, modelpreview, suncol, "i", (int *c), o->suncol = vec::fromcolor(*c));
-    UICMDT(ModelPreview, modelpreview, sundir, "fff", (float *x, float *y, float *z), o->sundir = vec(*x, *y, *z));
-    UICMDT(ModelPreview, modelpreview, excol, "i", (int *c), o->excol = vec::fromcolor(*c));
-    UICMDT(ModelPreview, modelpreview, exdir, "fff", (float *x, float *y, float *z), o->exdir = vec(*x, *y, *z));
-    UICMDT(ModelPreview, modelpreview, yaw, "f", (float *n), o->yaw = *n);
-    UICMDT(ModelPreview, modelpreview, pitch, "f", (float *n), o->pitch = *n);
-    UICMDT(ModelPreview, modelpreview, roll, "f", (float *n), o->roll = *n);
-    UICMDT(ModelPreview, modelpreview, fov, "f", (float *n), o->fov = *n);
-    UICMDT(ModelPreview, modelpreview, interact, "i", (int *c), o->interact = *c != 0);
-    UICMDT(ModelPreview, modelpreview, resetoffset, "", (void), o->resetoffset());
-    UICMDT(ModelPreview, modelpreview, colour, "fffg", (float *r, float *g, float *b, float *a), o->mdl.color = vec4(*r, *g, *b, *a >= 0 ? *a : 1.f));
-    UICMDT(ModelPreview, modelpreview, basetime, "bb", (int *b, int *c), o->mdl.basetime = *b >= 0 ? *b : uilastmillis; o->mdl.basetime2 = *c >= 0 ? *c : 0);
-    UICMDT(ModelPreview, modelpreview, material, "iiii", (int *mat, int *r, int *g, int *b), if(*mat >= 0 && *mat < MAXMDLMATERIALS) o->mdl.material[*mat] = bvec(*r, *g, *b));
-    UICMDT(ModelPreview, modelpreview, materialcol, "ii", (int *mat, int *c), if(*mat >= 0 && *mat < MAXMDLMATERIALS) o->mdl.material[*mat] = bvec::fromcolor(*c));
-    UICMDT(ModelPreview, modelpreview, effectparams, "ffff", (float *r, float *g, float *b, float *a), o->mdl.effectparams = vec4(*r, *g, *b, *a));
-    UICMDT(ModelPreview, modelpreview, matbright, "ffff", (float *x, float *y, float *z, float *w), o->mdl.matbright = vec4(*x, *y, *z, *w));
-    UICMDT(ModelPreview, modelpreview, matsplit, "f", (float *n), o->mdl.matsplit = clamp(*n, 0.0f, 0.5f));
-    UICMDT(ModelPreview, modelpreview, mixer, "s", (const char *texname), o->mdl.mixer = textureload(texname, 3, true, false));
-    UICMDT(ModelPreview, modelpreview, mixerscale, "f", (float *n), o->mdl.mixerscale = *n);
-
     struct PlayerPreview : Preview
     {
         float scale, blend;
         char *actions;
-        matrix4 lastmatrix;
 
-        PlayerPreview() : actions(NULL) { resetoffset(); }
+        PlayerPreview() : actions(NULL) {}
         ~PlayerPreview() { delete[] actions; }
 
-        void setup(float scale_, float blend_, float minw_, float minh_, const char *actions_, float yaw_ = -1, float pitch_ = -15, float roll_ = 0, float fov_ = 20, const vec &skycol_ = vec(0.1f, 0.1f, 0.1f), const vec &suncol_ = vec(0.6f, 0.6f, 0.6f), const vec &sundir_ = vec(0, -1, 2), const vec &excol_ = vec(0.f, 0.f, 0.f), const vec &exdir_ = vec(0, 0, 0))
+        void setup(float scale_, float blend_, float minw_, float minh_, const char *actions_)
         {
-            Preview::setup(minw_, minh_, yaw_, pitch_, roll_,fov_, skycol_, suncol_, sundir_, excol_, exdir_);
+            Preview::setup(minw_, minh_, Color(colourwhite));
             scale = scale_;
             blend = blend_;
             SETSTR(actions, actions_);
@@ -6430,79 +3929,36 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            if(!loadedshaders) { Object::draw(sx, sy); return; }
-
-            setupdraw(CHANGE_SHADER);
-
-            int sx1, sy1, sx2, sy2;
-            bool hasclipstack = clipstack.length() > 0;
-            window->calcscissor(sx, sy, sx+w, sy+h, sx1, sy1, sx2, sy2, false);
-
-            modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, pitch+offsetpitch, roll, fov, false, hasclipstack, translate);
-
-            colors[0].val.a = uchar(colors[0].val.a*blend);
-            game::renderplayerpreview(scale, colors[0].val.tocolor4(), actions, yaw, offsetyaw);
-            if(hasclipstack) clipstack.last().scissor();
-            // Steal the matrix for calculating positions on the model
-            lastmatrix = camprojmatrix;
-
-            modelpreview::end(renderfbo, skycol, suncol, sundir, excol, exdir);
-
             Object::draw(sx, sy);
-        }
 
-        vec2 vanityscreenpos(int vanity)
-        {
-            vec pos2d;
-            lastmatrix.transform(game::playerpreviewvanitypos(vanity), pos2d);
-            if(pos2d.z <= 0) return vec2(0, 0);
+            if(!loadedshaders) return;
 
-            pos2d.div(pos2d.z);
+            changedraw(CHANGE_SHADER);
 
             int sx1, sy1, sx2, sy2;
-            window->calcscissor(lastsx, lastsy, lastsx+lastw, lastsy+lasth, sx1, sy1, sx2, sy2, false);
-
-            pos2d.add(vec(1.0f, 1.0f, 0.0f)).mul(vec(0.5f, 0.5f, 0.0f));
-            pos2d.y = 1.0f - pos2d.y;
-            pos2d.mul(vec((sx2-sx1)/(float)hudw, (sy2-sy1)/(float)hudh, 0.0f));
-
-            // Correct for uiaspect
-            pos2d.x *= hudw/(float)hudh;
-
-            return vec2(pos2d.x, pos2d.y);
+            window->calcscissor(sx, sy, sx+w, sy+h, sx1, sy1, sx2, sy2, false);
+            modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, false, clipstack.length() > 0);
+            colors[0].a = uchar(colors[0].a*blend);
+            game::renderplayerpreview(scale, colors[0].tocolor4(), actions);
+            if(clipstack.length()) clipstack.last().scissor();
+            modelpreview::end();
         }
-
-        vec vanitypos(int vanity) { return game::playerpreviewvanitypos(vanity, true); }
     };
 
     ICOMMAND(0, uiplayerpreview, "ffffse", (float *scale, float *blend, float *minw, float *minh, char *actions, uint *children),
         BUILD(PlayerPreview, o, o->setup(*scale, *blend, *minw*uiscale, *minh*uiscale, actions), children));
-
-    UICMD(PlayerPreview, playerpreview, vanityscreenpos, "i", (int *vanity),
-    {
-        vec2 pos = o->vanityscreenpos(*vanity);
-        defformatbigstring(str, "%f %f", pos.x, pos.y);
-        result(str);
-    });
-
-    UICMD(PlayerPreview, playerpreview, vanitypos, "i", (int *vanity),
-    {
-        vec pos = o->vanitypos(*vanity);
-        defformatbigstring(str, "%f %f %f", pos.x, pos.y, pos.z);
-        result(str);
-    });
 
     struct PrefabPreview : Preview
     {
         char *name;
         float blend;
 
-        PrefabPreview() : name(NULL) { resetoffset(); }
+        PrefabPreview() : name(NULL) {}
         ~PrefabPreview() { delete[] name; }
 
-        void setup(const char *name_, const Color &color_, float blend, float minw_, float minh_, float yaw_ = -1, float pitch_ = -15, float roll_ = 0, float fov_ = 20, const vec &skycol_ = vec(0.1f, 0.1f, 0.1f), const vec &suncol_ = vec(0.6f, 0.6f, 0.6f), const vec &sundir_ = vec(0, -1, 2), const vec &excol_ = vec(0.f, 0.f, 0.f), const vec &exdir_ = vec(0, 0, 0))
+        void setup(const char *name_, const Color &color_, float blend, float minw_, float minh_)
         {
-            Preview::setup(minw_, minh_, yaw_, pitch_, roll_, fov_, skycol_, suncol_, sundir_, excol_, exdir_, color_);
+            Preview::setup(minw_, minh_, color_);
             SETSTR(name, name_);
         }
 
@@ -6515,20 +3971,21 @@ namespace UI
 
             if(!loadedshaders) return;
 
-            setupdraw(CHANGE_SHADER);
+            changedraw(CHANGE_SHADER);
 
             int sx1, sy1, sx2, sy2;
-            bool hasclipstack = clipstack.length() > 0;
             window->calcscissor(sx, sy, sx+w, sy+h, sx1, sy1, sx2, sy2, false);
-            modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, pitch, roll, fov, false, hasclipstack);
-            previewprefab(name, colors[0].val.tocolor(), blend*(colors[0].val.a/255.f), yaw, offsetyaw);
-            if(hasclipstack) clipstack.last().scissor();
-            modelpreview::end(renderfbo, skycol, suncol, sundir, excol, exdir);
+            modelpreview::start(sx1, sy1, sx2-sx1, sy2-sy1, false, clipstack.length() > 0);
+            previewprefab(name, colors[0].tocolor(), blend*(colors[0].a/255.f));
+            if(clipstack.length()) clipstack.last().scissor();
+            modelpreview::end();
         }
     };
 
     ICOMMAND(0, uiprefabpreview, "sifffe", (char *prefab, int *colour, float *blend, float *minw, float *minh, uint *children),
         BUILD(PrefabPreview, o, o->setup(prefab, Color(*colour), *blend, *minw*uiscale, *minh*uiscale), children));
+
+    static int lastthumbnail = 0;
 
     struct SlotViewer : Target
     {
@@ -6564,19 +4021,15 @@ namespace UI
             {
                 if(!slot.thumbnail)
                 {
-                    if(uiclockticks - lastthumbnail < uislotviewtime) t = textureload(uiloadtex);
-                    else
-                    {
-                        slot.loadthumbnail();
-                        lastthumbnail = uiclockticks;
-                    }
+                    if(totalmillis - lastthumbnail < uislotviewtime) return;
+                    slot.loadthumbnail();
+                    lastthumbnail = totalmillis;
                 }
-                if(slot.thumbnail && slot.thumbnail != notexture) t = slot.thumbnail;
+                if(slot.thumbnail != notexture) t = slot.thumbnail;
+                else return;
             }
 
-            if(!t || t == notexture) return;
-
-            setupdraw(CHANGE_SHADER|(glowtex ? CHANGE_BLEND : 0));
+            changedraw(CHANGE_SHADER | CHANGE_COLOR);
 
             SETSHADER(hudrgb);
             vec2 tc[4] = { vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1) };
@@ -6590,42 +4043,38 @@ namespace UI
             }
             float xt = min(1.0f, t->xs/float(t->ys)), yt = min(1.0f, t->ys/float(t->xs));
             loopk(4) { tc[k].x = tc[k].x/xt - float(xoff)/t->xs; tc[k].y = tc[k].y/yt - float(yoff)/t->ys; }
-            settexture(t);
+            glBindTexture(GL_TEXTURE_2D, t->id);
             vec colorscale = vslot.getcolorscale();
-            if(slot.loaded) gle::colorf(colorscale.x*colors[0].val.r/255.f, colorscale.y*colors[0].val.g/255.f, colorscale.z*colors[0].val.b/255.f, colors[0].val.a/255.f);
+            if(slot.loaded) gle::colorf(colorscale.x*colors[0].r/255.f, colorscale.y*colors[0].g/255.f, colorscale.z*colors[0].b/255.f, colors[0].a/255.f);
             else gle::colorf(1, 1, 1);
             quad(x, y, w, h, tc);
             if(detailtex)
             {
-                settexture(detailtex);
+                glBindTexture(GL_TEXTURE_2D, detailtex->id);
                 quad(x + w/2, y + h/2, w/2, h/2, tc);
             }
             if(glowtex)
             {
-                int oldblendtype = blendtype;
-                setblend(BLEND_GLOW, blendsep);
-                settexture(glowtex);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                glBindTexture(GL_TEXTURE_2D, glowtex->id);
                 vec glowcolor = vslot.getglowcolor();
-                gle::colorf(glowcolor.x*colors[0].val.r/255.f, glowcolor.y*colors[0].val.g/255.f, glowcolor.z*colors[0].val.b/255.f, colors[0].val.a/255.f);
+                gle::colorf(glowcolor.x*colors[0].r/255.f, glowcolor.y*colors[0].g/255.f, glowcolor.z*colors[0].b/255.f, colors[0].a/255.f);
                 quad(x, y, w, h, tc);
-                setblend(oldblendtype, blendsep);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             }
             if(layertex)
             {
                 vec layerscale = layer->getcolorscale();
-                settexture(layertex);
-                gle::colorf(layerscale.x*colors[0].val.r/255.f, layerscale.y*colors[0].val.g/255.f, layerscale.z*colors[0].val.g/255.f, colors[0].val.a/255.f);
+                glBindTexture(GL_TEXTURE_2D, layertex->id);
+                gle::colorf(layerscale.x*colors[0].r/255.f, layerscale.y*colors[0].g/255.f, layerscale.z*colors[0].g/255.f, colors[0].a/255.f);
                 quad(x, y, w/2, h/2, tc);
             }
         }
 
         void draw(float sx, float sy)
         {
-            if(slots.inrange(index))
-            {
-                Slot &slot = lookupslot(index, false);
-                previewslot(slot, *slot.variants, sx, sy);
-            }
+            Slot &slot = lookupslot(index, false);
+            previewslot(slot, *slot.variants, sx, sy);
 
             Object::draw(sx, sy);
         }
@@ -6641,11 +4090,8 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            if(vslots.inrange(index))
-            {
-                VSlot &vslot = lookupvslot(index, false);
-                previewslot(*vslot.slot, vslot, sx, sy);
-            }
+            VSlot &vslot = lookupvslot(index, false);
+            previewslot(*vslot.slot, vslot, sx, sy);
 
             Object::draw(sx, sy);
         }
@@ -6654,115 +4100,27 @@ namespace UI
     ICOMMAND(0, uivslotview, "iffe", (int *index, float *minw, float *minh, uint *children),
         BUILD(VSlotViewer, o, o->setup(*index, *minw*uiscale, *minh*uiscale), children));
 
-    struct DecalSlotViewer : SlotViewer
-    {
-        static const char *typestr() { return "#DecalSlotViewer"; }
-        const char *gettype() const { return typestr(); }
-
-        void previewslot(Slot &slot, VSlot &vslot, float x, float y)
-        {
-            if(!loadedshaders || slot.sts.empty()) return;
-            Texture *t = NULL, *glowtex = NULL;
-            if(slot.loaded)
-            {
-                t = slot.sts[0].t;
-                if(t == notexture) return;
-                Slot &slot = *vslot.slot;
-                if(slot.texmask&(1<<TEX_GLOW)) { loopvj(slot.sts) if(slot.sts[j].type==TEX_GLOW) { glowtex = slot.sts[j].t; break; } }
-            }
-            else
-            {
-                if(!slot.thumbnail)
-                {
-                    if(uiclockticks - lastthumbnail < uislotviewtime) t = textureload(uiloadtex);
-                    else
-                    {
-                        slot.loadthumbnail();
-                        lastthumbnail = uiclockticks;
-                    }
-                }
-                if(slot.thumbnail && slot.thumbnail != notexture) t = slot.thumbnail;
-            }
-
-            if(!t || t == notexture) return;
-
-            setupdraw(CHANGE_SHADER|(glowtex ? CHANGE_BLEND : 0));
-
-            SETSHADER(hudrgb);
-            vec2 tc[4] = { vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1) };
-            float xoff = float(vslot.offset.x)/t->xs, yoff = float(vslot.offset.y)/t->ys;
-            float xt = min(1.0f, t->xs/float(t->ys)), yt = min(1.0f, t->ys/float(t->xs));
-
-            xoff += (1.0f - xt) * 0.5f; yoff += (1.0f - yt) * 0.5f;
-
-            if(vslot.rotation)
-            {
-                const texrotation &r = texrotations[vslot.rotation];
-                if(r.swapxy) { swap(xoff, yoff); loopk(4) swap(tc[k].x, tc[k].y); }
-                if(r.flipx) { xoff *= -1; loopk(4) tc[k].x *= -1; }
-                if(r.flipy) { yoff *= -1; loopk(4) tc[k].y *= -1; }
-            }
-            loopk(4) { tc[k].x = (tc[k].x - xoff)/xt; tc[k].y = (tc[k].y - yoff)/yt; }
-            settexture(t);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-            vec colorscale = vslot.getcolorscale();
-            if(slot.loaded) gle::colorf(colorscale.x*colors[0].val.r/255.f, colorscale.y*colors[0].val.g/255.f, colorscale.z*colors[0].val.b/255.f, colors[0].val.a/255.f);
-            else gle::colorf(1, 1, 1, 1);
-            quad(x, y, w, h, tc);
-            if(glowtex)
-            {
-                setblend(BLEND_GLOW, blendsep);
-                settexture(glowtex);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-                vec glowcolor = vslot.getglowcolor();
-                gle::colorf(glowcolor.x*colors[0].val.r/255.f, glowcolor.y*colors[0].val.g/255.f, glowcolor.z*colors[0].val.b/255.f, colors[0].val.a/255.f);
-                quad(x, y, w, h, tc);
-            }
-        }
-
-        void draw(float sx, float sy)
-        {
-            if(decalslots.inrange(index))
-            {
-                DecalSlot &slot = lookupdecalslot(index, false);
-                previewslot(slot, *slot.variants, sx, sy);
-            }
-
-            Object::draw(sx, sy);
-        }
-    };
-
-    ICOMMAND(0, uidecalslotview, "iffe", (int *index, float *minw, float *minh, uint *children),
-        BUILD(DecalSlotViewer, o, o->setup(*index, *minw*uiscale, *minh*uiscale), children));
-
     struct MiniMap : Target
     {
-        enum { ELLIPSE = 0, SQUARE };
-
         Texture *tex;
         float dist, border;
-        int shape;
 
-        void setup(Texture *tex_, const Color &color_, float dist_ = 0, float border_ = 0.05f, float minw_ = 0, float minh_ = 0, int shape_ = ELLIPSE)
+        void setup(Texture *tex_, const Color &color_, float dist_ = 0, float border_ = 0.05f, float minw_ = 0, float minh_ = 0)
         {
-            Target::setup(minw_, minh_, color_);
+            Target::setup(minw_, minh_, color_, SOLID, VERTICAL);
             colors.add(Color(colourwhite));
             tex = tex_;
             dist = dist_;
             border = border_;
-            shape = shape_;
         }
 
-        void setup(Texture *tex_, const Color &color_, const Color &color2_, float dist_ = 0, float border_ = 0.05f, float minw_ = 0, float minh_ = 0, int shape_ = ELLIPSE)
+        void setup(Texture *tex_, const Color &color_, const Color &color2_, float dist_ = 0, float border_ = 0.05f, float minw_ = 0, float minh_ = 0)
         {
-            Target::setup(minw_, minh_, color_);
+            Target::setup(minw_, minh_, color_, SOLID, VERTICAL);
             colors.add(color2_); // minimap version
             tex = tex_;
             dist = dist_;
             border = border_;
-            shape = shape_;
         }
 
         static const char *typestr() { return "#MiniMap"; }
@@ -6775,69 +4133,35 @@ namespace UI
 
         void draw(float sx, float sy)
         {
-            setupdraw();
+            changedraw(CHANGE_COLOR);
             while(colors.length() < 2) colors.add(Color(colourwhite));
-
             if(hud::needminimap())
             {
-                Shader *oldshader = Shader::lastshader;
-                SETSHADER(hudminimap);
-
-                LOCALPARAMF(minimapparams, 2<<(minimapsize-1));
-
-                vec pos = vec(camera1->o).sub(minimapcenter).mul(minimapscale).add(0.5f), dir(camera1->yaw * RAD, 0.f);
+                vec pos = vec(camera1->o).sub(minimapcenter).mul(minimapscale).add(0.5f), dir(camera1->yaw*RAD, 0.f);
                 int limit = hud::radarlimit();
                 float scale = min(dist > 0 ? dist : float(worldsize), limit > 0 ? limit : float(worldsize)),
-                      qw = w * 0.25f * border, qh = h * 0.25f * border, rw = w * 0.5f - qw, rh = h * 0.5f - qh;
-
-                colors[1].init(game::darkness(DARK_UI));
+                      qw = w*0.5f*border, qh = h*0.5f*border, rw = w*0.5f-qw, rh = h*0.5f-qh;
+                colors[1].init();
                 gle::defvertex(2);
                 gle::deftexcoord0();
-
-                if(shape == SQUARE)
+                gle::begin(GL_TRIANGLE_FAN);
+                bindminimap();
+                loopi(32)
                 {
-                    gle::begin(GL_QUADS);
-                    bindminimap();
-
-                    const int corners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
-                    loopi(4)
-                    {
-                        float angle = fmod(camera1->yaw + 180, 360) * RAD,
-                              rx = corners[i][0] * cos(angle) - corners[i][1] * sin(angle),
-                              ry = corners[i][0] * sin(angle) + corners[i][1] * cos(angle);
-
-                        gle::attribf(sx + qw + rw * (1.0f + corners[i][0]), sy + qh + rh * (1.0f + corners[i][1]));
-                        gle::attribf(1.0f - (pos.x + rx * scale * minimapscale.x), pos.y + ry * scale * minimapscale.y);
-                    }
-
-                    gle::end();
+                    vec v = vec(0, -1, 0).rotate_around_z(i/32.0f*2*M_PI);
+                    gle::attribf(sx + qw + rw*(1.0f + v.x), sy + qh + rh*(1.0f + v.y));
+                    vec tc = vec(dir).rotate_around_z(i/32.0f*2*M_PI);
+                    gle::attribf(1.0f - (pos.x + tc.x*scale*minimapscale.x), pos.y + tc.y*scale*minimapscale.y);
                 }
-                else
-                {
-                    gle::begin(GL_TRIANGLE_FAN);
-                    bindminimap();
-
-                    loopi(32)
-                    {
-                        vec v = vec(0, -1, 0).rotate_around_z(i / 32.0f * 2 * M_PI);
-                        gle::attribf(sx + qw + rw * (1.0f + v.x), sy + qh + rh * (1.0f + v.y));
-                        vec tc = vec(dir).rotate_around_z(i / 32.0f * 2 * M_PI);
-                        gle::attribf(1.0f - (pos.x + tc.x * scale * minimapscale.x), pos.y + tc.y * scale * minimapscale.y);
-                    }
-
-                    gle::end();
-                }
-
-                if(oldshader) oldshader->set();
+                gle::end();
             }
-
             if(tex != notexture)
             {
                 colors[0].init();
                 gle::defvertex(2);
                 gle::deftexcoord0();
                 gle::begin(GL_QUADS);
-                settexture(tex);
+                glBindTexture(GL_TEXTURE_2D, tex->id);
                 quads(sx, sy, w, h);
                 gle::end();
             }
@@ -6847,20 +4171,13 @@ namespace UI
     };
 
     ICOMMAND(0, uiminimap, "siffffe", (char *texname, int *c, float *dist, float *border, float *minw, float *minh, uint *children),
-        BUILD(MiniMap, o, o->setup(textureload(texname, 0x7000, true, false, texgc), Color(*c), *dist, *border, *minw*uiscale, *minh*uiscale), children));
+        BUILD(MiniMap, o, o->setup(textureload(texname, 0x7000, true, false), Color(*c), *dist, *border, *minw*uiscale, *minh*uiscale), children));
     ICOMMAND(0, uiminimapcolour, "siiffffe", (char *texname, int *c, int *c2, float *dist, float *border, float *minw, float *minh, uint *children),
-        BUILD(MiniMap, o, o->setup(textureload(texname, 0x7000, true, false, texgc), Color(*c), Color(*c2), *dist, *border, *minw*uiscale, *minh*uiscale), children));
-
-    UIARG(MiniMap, minimap, dist, "f", float, 0.0f, FVAR_MAX);
-    UIARG(MiniMap, minimap, border, "f", float, 0.0f, 1.0f);
-    UIARG(MiniMap, minimap, shape, "i", int, MiniMap::ELLIPSE, MiniMap::SQUARE);
+        BUILD(MiniMap, o, o->setup(textureload(texname, 0x7000, true, false), Color(*c), Color(*c2), *dist, *border, *minw*uiscale, *minh*uiscale), children));
 
     struct Radar : Target
     {
-        enum { ELLIPSE = 0, SQUARE, BEARING };
-
-        float dist, offset, border, maxdist;
-        int shape;
+        float dist, offset, border;
 
         void setup(float dist_ = 1, float offset_ = 0, float border_ = 0, float minw_ = 0, float minh_ = 0)
         {
@@ -6868,8 +4185,6 @@ namespace UI
             dist = dist_;
             offset = clamp(offset_, 0.f, 1.f);
             border = clamp(border_, 0.f, 1.f);
-            maxdist = 0.0f;
-            shape = ELLIPSE;
         }
         bool isradar() const { return true; }
 
@@ -6890,37 +4205,19 @@ namespace UI
     ICOMMAND(0, uiradar, "fffffe", (float *dist, float *offset, float *border, float *minw, float *minh, uint *children),
         BUILD(Radar, o, o->setup(*dist, *offset, *border, *minw*uiscale, *minh*uiscale), children));
 
-    UIARG(Radar, radar, dist, "f", float, 0.0f, FVAR_MAX);
-    UIARG(Radar, radar, maxdist, "f", float, 0.0f, FVAR_MAX);
-    UIARG(Radar, radar, border, "f", float, 0.0f, 1.0f);
-    UIARG(Radar, radar, offset, "f", float, 0.0f, 1.0f);
-    UIARG(Radar, radar, shape, "i", int, Radar::ELLIPSE, Radar::BEARING);
-
-    void radarfade(Object *o, float alpha)
-    {
-        if(o->iscolour())
-        {
-            Colored *c = (Colored *)o;
-            loopv(c->colors) c->colors[i].val.a = uchar(c->colors[i].val.a * alpha);
-        }
-        loopv(o->children) radarfade(o->children[i], alpha);
-    }
-
     struct RadarBlip : Image
     {
-        float yaw, blipx, blipy, texx, texy, dist, heading, maxdist;
+        float yaw, blipx, blipy, texx, texy, dist, blipyaw;
         uchar blipadjust;
-        int priority;
 
-        void setup(Texture *tex_, const Color &color_, float yaw_ = 0, float heading_ = 0, float dist_ = 0, float minw_ = 0, float minh_ = 0)
+        void setup(Texture *tex_, const Color &color_, float yaw_ = 0, float blipyaw_ = 0, float dist_ = 0, float minw_ = 0, float minh_ = 0)
         {
             Image::setup(tex_, color_, true, minw_, minh_);
             yaw = yaw_; // direction in which the blip is
-            heading = heading_; // rotation of the blip itself
+            blipyaw = blipyaw_; // rotation of the blip itself
             dist = dist_; // how far away the blip is
-            blipx = blipy = texx = texy = maxdist = 0;
-            blipadjust = ALIGN_DEFAULT;
-            priority = 0;
+            blipx = blipy = texx = texy = 0;
+            blipadjust = ALIGN_HCENTER | ALIGN_VCENTER;
         }
 
         static const char *typestr() { return "#RadarBlip"; }
@@ -6940,12 +4237,9 @@ namespace UI
         {
             blipx = sinf(RAD*yaw);
             blipy = -cosf(RAD*yaw);
-
-            texx = sinf(RAD*heading);
-            texy = -cosf(RAD*heading);
-
+            texx = sinf(RAD*blipyaw);
+            texy = -cosf(RAD*blipyaw);
             Image::layout();
-
             // children don't increase the dimensions of a blip if specified
             if(minw > 0 && w > minw) w = minw;
             if(minh > 0 && h > minh) h = minh;
@@ -6953,8 +4247,7 @@ namespace UI
 
         void setalign(int xalign, int yalign)
         {
-            adjust = ALIGN_DEFAULT; // always align center and use our own adjustment
-
+            adjust = ALIGN_HCENTER | ALIGN_VCENTER; // always align center and use our own adjustment
             blipadjust &= ~ALIGN_MASK;
             blipadjust |= (clamp(xalign, -2, 1)+2)<<ALIGN_HSHIFT;
             blipadjust |= (clamp(yalign, -2, 1)+2)<<ALIGN_VSHIFT;
@@ -6975,85 +4268,9 @@ namespace UI
             Radar *r = getradar();
             if(r)
             {
-                if(dist > r->dist && !(priority&1))
-                {
-                    float md = max(r->maxdist, maxdist);
-
-                    if(md > r->dist)
-                    {
-                        if(dist < md)
-                            radarfade(this, 1.0f - clamp((dist - r->dist) / (md - r->dist), 0.0f, 1.0f));
-                        else return;
-                    }
-                    else if(md > 0.0f) return;
-                }
-
-                float bb = priority&8 ? 0.0f : r->border,
-                      bw = w * 0.5f, bh = h * 0.5f, rw = r->w * 0.5f, rh = r->h * 0.5f, rd = max(r->dist, 1.f),
-                      rx = 0, ry = 0, fw = rw * bb, fh = rh * bb, gw = rw - fw, gh = rh - fh;
-
-                switch(r->shape)
-                {
-                    case Radar::BEARING:
-                    {
-                        if(blipy > 0.0f)
-                        {
-                            if(!(priority&2)) return;
-                            if(!(priority&4)) radarfade(this, 0.5f);
-                            rx = blipx > 0.0f ? gw : -gw;
-                        }
-                        else
-                        {
-                            if(!(priority&4))
-                            {
-                                float fade = fabs(blipx);
-                                if(priority&2) fade *= 0.5f;
-                                radarfade(this, 1.0f - fade);
-                            }
-                            rx = clamp(blipx * gw, -gw, gw);
-                        }
-                        break;
-                    }
-
-                    case Radar::SQUARE:
-                    {
-                        rx = clamp(blipx * gw * dist / rd, -gw, gw);
-                        ry = clamp(blipy * gh * dist / rd, -gh, gh);
-                        break;
-                    }
-
-                    default:
-                    {
-                        rx = blipx * gw * clamp(dist / rd, 0.f, 1.f);
-                        ry = blipy * gh * clamp(dist / rd, 0.f, 1.f);
-                        break;
-                    }
-                }
-
-                if(r->shape != Radar::BEARING)
-                {
-                    float mx = rx, my = ry;
-                    if(mx != 0 || my != 0)
-                    {
-                        float ds = sqrtf(mx*mx + my*my);
-                        if(ds > 0)
-                        {
-                            mx /= ds;
-                            my /= ds;
-                        }
-                    }
-
-                    mx *= r->offset * gw;
-                    my *= r->offset * gh;
-
-                    rx += sx + mx;
-                    ry += sy + my;
-                }
-                else
-                {
-                    rx += sx;
-                    ry += sy;
-                }
+                float bw = w*0.5f, bh = h*0.5f, rw = r->w*0.5f, rh = r->h*0.5f,
+                      rx = sx+(blipx*(rw-(rw*r->border))*clamp(dist/max(r->dist, 1.f), r->offset, 1.f)),
+                      ry = sy+(blipy*(rh-(rh*r->border))*clamp(dist/max(r->dist, 1.f), r->offset, 1.f));
 
                 vec2 anrm(0, 0);
                 switch(blipadjust&ALIGN_HMASK)
@@ -7061,20 +4278,14 @@ namespace UI
                     case ALIGN_LEFT:    anrm.x = -1; break;
                     case ALIGN_RIGHT:   anrm.x = 1; break;
                 }
-
                 switch(blipadjust&ALIGN_VMASK)
                 {
                     case ALIGN_TOP:     anrm.y = 1; break;
                     case ALIGN_BOTTOM:  anrm.y = -1; break;
                 }
-
                 if(!anrm.iszero())
                 { // adjust the alignment of the blip taking into account its rotation
-                    anrm.normalize().mul(vec2(bw, r->shape != Radar::BEARING ? bh : gh - bh));
-
-                    if(r->shape != Radar::BEARING) anrm.rotate_around_z(yaw * RAD);
-                    else anrm.mul(-1);
-
+                    anrm.normalize().mul(vec2(bw, bh)).rotate_around_z(yaw*RAD);
                     rx += anrm.x;
                     ry += anrm.y;
                 }
@@ -7083,203 +4294,179 @@ namespace UI
                 if(tex != notexture)
                 {
                     bindtex();
-
                     bbx = texx;
                     bby = texy;
-
                     loopk(4)
                     {
-                        vec2 norm(0, 0);
+                        vec2 norm;
                         float tx = 0, ty = 0;
                         switch(k)
                         {
-                            case 0: vecfromyaw(heading, -1, -1, norm);  tx = 0; ty = 0; break;
-                            case 1: vecfromyaw(heading, -1, 1, norm);   tx = 1; ty = 0; break;
-                            case 2: vecfromyaw(heading, 1, 1, norm);    tx = 1; ty = 1; break;
-                            case 3: vecfromyaw(heading, 1, -1, norm);   tx = 0; ty = 1; break;
+                            case 0: vecfromyaw(blipyaw, -1, -1, norm);  tx = 0; ty = 0; break;
+                            case 1: vecfromyaw(blipyaw, -1, 1, norm);   tx = 1; ty = 0; break;
+                            case 2: vecfromyaw(blipyaw, 1, 1, norm);    tx = 1; ty = 1; break;
+                            case 3: vecfromyaw(blipyaw, 1, -1, norm);   tx = 0; ty = 1; break;
                         }
-                        norm.mul(vec2(bw, bh)).add(vec2(rx + bw, ry + bh));
-
-                        gle::attrib(norm);
-                        gle::attribf(tx, ty);
+                        norm.mul(vec2(bw, bh)).add(vec2(rx+bw, ry+bh));
+                        gle::attrib(norm); gle::attribf(tx, ty);
                     }
                 }
-                Object::draw(rx + bbx * w * RAD, ry + bby * h * RAD); // don't descend unless we process the blip
+                Object::draw(rx+bbx*w*RAD, ry+bby*h*RAD); // don't descend unless we process the blip
             }
         }
     };
 
-    ICOMMAND(0, uiradarblip, "sifffffe", (char *texname, int *c, float *yaw, float *heading, float *dist, float *minw, float *minh, uint *children),
-        BUILD(RadarBlip, o, o->setup(texname && texname[0] ? textureload(texname, 3, true, false, texgc) : NULL, Color(*c), *yaw, *heading, *dist, *minw*uiscale, *minh*uiscale), children));
-
-    UIARG(RadarBlip, radarblip, priority, "i", int, 0, 15);
-    UIARG(RadarBlip, radarblip, yaw, "f", float, FVAR_MIN, FVAR_MAX);
-    UIARG(RadarBlip, radarblip, dist, "f", float, 0.0f, FVAR_MAX);
-    UIARG(RadarBlip, radarblip, heading, "f", float, FVAR_MIN, FVAR_MAX);
-    UIARG(RadarBlip, radarblip, maxdist, "f", float, 0.0f, FVAR_MAX);
+    ICOMMAND(0, uiradarblip, "sifffffe", (char *texname, int *c, float *yaw, float *blipyaw, float *dist, float *minw, float *minh, uint *children),
+        BUILD(RadarBlip, o, o->setup(textureload(texname, 3, true, false), Color(*c), *yaw, *blipyaw, *dist, *minw*uiscale, *minh*uiscale), children));
 
     #define IFSTATEVAL(state,t,f) { if(state) { if(t->type == VAL_NULL) intret(1); else result(*t); } else if(f->type == VAL_NULL) intret(0); else result(*f); }
-    #define DOSTATE(chkflags, func) \
+    #define DOSTATE(flags, func) \
         ICOMMANDNS(0, "ui!" #func, uinot##func##_, "ee", (uint *t, uint *f), \
-            executeret(buildparent && buildparent->hasstate(chkflags) ? t : f)); \
+            executeret(buildparent && buildparent->hasstate(flags) ? t : f)); \
         ICOMMANDNS(0, "ui" #func, ui##func##_, "ee", (uint *t, uint *f), \
-            executeret(buildparent && buildparent->haschildstate(chkflags) ? t : f)); \
+            executeret(buildparent && buildparent->haschildstate(flags) ? t : f)); \
         ICOMMANDNS(0, "ui!" #func "?", uinot##func##__, "tt", (tagval *t, tagval *f), \
-            IFSTATEVAL(buildparent && buildparent->hasstate(chkflags), t, f)); \
+            IFSTATEVAL(buildparent && buildparent->hasstate(flags), t, f)); \
         ICOMMANDNS(0, "ui" #func "?", ui##func##__, "tt", (tagval *t, tagval *f), \
-            IFSTATEVAL(buildparent && buildparent->haschildstate(chkflags), t, f)); \
+            IFSTATEVAL(buildparent && buildparent->haschildstate(flags), t, f)); \
         ICOMMANDNS(0, "ui!" #func "+", uinextnot##func##_, "ee", (uint *t, uint *f), \
-            executeret(buildparent && buildparent->children.inrange(buildparent->buildchild) && buildparent->children[buildparent->buildchild]->hasstate(chkflags) ? t : f)); \
+            executeret(buildparent && buildparent->children.inrange(buildchild) && buildparent->children[buildchild]->hasstate(flags) ? t : f)); \
         ICOMMANDNS(0, "ui" #func "+", uinext##func##_, "ee", (uint *t, uint *f), \
-            executeret(buildparent && buildparent->children.inrange(buildparent->buildchild) && buildparent->children[buildparent->buildchild]->haschildstate(chkflags) ? t : f)); \
+            executeret(buildparent && buildparent->children.inrange(buildchild) && buildparent->children[buildchild]->haschildstate(flags) ? t : f)); \
         ICOMMANDNS(0, "ui!" #func "+?", uinextnot##func##__, "tt", (tagval *t, tagval *f), \
-            IFSTATEVAL(buildparent && buildparent->children.inrange(buildparent->buildchild) && buildparent->children[buildparent->buildchild]->hasstate(chkflags), t, f)); \
+            IFSTATEVAL(buildparent && buildparent->children.inrange(buildchild) && buildparent->children[buildchild]->hasstate(flags), t, f)); \
         ICOMMANDNS(0, "ui" #func "+?", uinext##func##__, "tt", (tagval *t, tagval *f), \
-            IFSTATEVAL(buildparent && buildparent->children.inrange(buildparent->buildchild) && buildparent->children[buildparent->buildchild]->haschildstate(chkflags), t, f));
+            IFSTATEVAL(buildparent && buildparent->children.inrange(buildchild) && buildparent->children[buildchild]->haschildstate(flags), t, f));
     DOSTATES
     #undef DOSTATE
 
-    ICOMMANDNS(0, "uianyfocus", uifocus_, "", (), intret(textfocus != NULL));
-
-    #define TEXTEDITOR(chk, obj) TextEditor *e = chk && obj->iseditor() ? (TextEditor *)obj : NULL
-    #define TEXTEDITTF e && e->edit && e->edit == textfocus
-
     ICOMMANDNS(0, "uifocus", uifocus_, "ee", (uint *t, uint *f),
-    {
-        TEXTEDITOR(buildparent, buildparent);
-        executeret(TEXTEDITTF ? t : f);
-    });
+        executeret(buildparent && TextEditor::focus == buildparent ? t : f));
     ICOMMANDNS(0, "uifocus?", uifocus__, "tt", (tagval *t, tagval *f),
-    {
-        TEXTEDITOR(buildparent, buildparent);
-        IFSTATEVAL(TEXTEDITTF, t, f)
-    });
+        IFSTATEVAL(buildparent && TextEditor::focus == buildparent, t, f));
     ICOMMANDNS(0, "uifocus+", uinextfocus_, "ee", (uint *t, uint *f),
-    {
-        TEXTEDITOR(buildparent && buildparent->children.inrange(buildparent->buildchild), buildparent->children[buildparent->buildchild]);
-        executeret(TEXTEDITTF ? t : f);
-    });
+        executeret(buildparent && buildparent->children.inrange(buildchild) && TextEditor::focus == buildparent->children[buildchild] ? t : f));
     ICOMMANDNS(0, "uifocus+?", uinextfocus__, "tt", (tagval *t, tagval *f),
-    {
-        TEXTEDITOR(buildparent && buildparent->children.inrange(buildparent->buildchild), buildparent->children[buildparent->buildchild]);
-        IFSTATEVAL(TEXTEDITTF, t, f)
-    });
+        IFSTATEVAL(buildparent && buildparent->children.inrange(buildchild) && TextEditor::focus == buildparent->children[buildchild], t, f));
     ICOMMANDNS(0, "uifocus-", uinextfocus_, "ee", (uint *t, uint *f),
-    {
-        TEXTEDITOR(buildparent && buildparent->buildchild > 0 && buildparent->children.inrange(buildparent->buildchild-1), buildparent->children[buildparent->buildchild-1]);
-        executeret(TEXTEDITTF ? t : f);
-    });
+        executeret(buildparent && buildchild > 0 && buildparent->children.inrange(buildchild-1) && TextEditor::focus == buildparent->children[buildchild-1] ? t : f));
     ICOMMANDNS(0, "uifocus-?", uinextfocus__, "tt", (tagval *t, tagval *f),
+        IFSTATEVAL(buildparent && buildchild > 0 && buildparent->children.inrange(buildchild-1) && TextEditor::focus == buildparent->children[buildchild-1], t, f));
+
+    ICOMMAND(0, uialign, "ii", (int *xalign, int *yalign),
     {
-        TEXTEDITOR(buildparent && buildparent->buildchild > 0 && buildparent->children.inrange(buildparent->buildchild-1), buildparent->children[buildparent->buildchild-1]);
-        IFSTATEVAL(TEXTEDITTF, t, f);
+        if(buildparent) buildparent->setalign(*xalign, *yalign);
+    });
+    ICOMMANDNS(0, "uialign-", uialign_, "ii", (int *xalign, int *yalign),
+    {
+        if(buildparent && buildchild > 0) buildparent->children[buildchild-1]->setalign(*xalign, *yalign);
+    });
+    ICOMMANDNS(0, "uialign*", uialign__, "ii", (int *xalign, int *yalign),
+    {
+        if(buildparent) loopi(buildchild) buildparent->children[i]->setalign(*xalign, *yalign);
     });
 
-    ICOMMAND(0, uiprev, "e", (uint *code),
+    ICOMMAND(0, uiclamp, "iiii", (int *left, int *right, int *top, int *bottom),
     {
-        if(!buildparent || buildparent->buildchild <= 0) return;
-        Object *oldparent = buildparent;
-        buildparent = oldparent->children[oldparent->buildchild-1];
-        executeret(code);
-        buildparent = oldparent;
+        if(buildparent) buildparent->setclamp(*left, *right, *top, *bottom);
+    });
+    ICOMMANDNS(0, "uiclamp-", uiclamp_, "iiii", (int *left, int *right, int *top, int *bottom),
+    {
+        if(buildparent && buildchild > 0) buildparent->children[buildchild-1]->setclamp(*left, *right, *top, *bottom);
+    });
+    ICOMMANDNS(0, "uiclamp*", uiclamp__, "iiii", (int *left, int *right, int *top, int *bottom),
+    {
+        if(buildparent) loopi(buildchild) buildparent->children[i]->setclamp(*left, *right, *top, *bottom);
     });
 
-    ICOMMAND(0, uipropchild, "e", (uint *code),
+    ICOMMAND(0, uiposition, "ff", (float *x, float *y),
     {
-        if(!buildparent) return;
-        bool oldprop = propagating;
-        propagating = true;
-        Object *oldparent = buildparent;
-        loopv(oldparent->children)
-        {
-            buildparent = oldparent->children[i];
-            executeret(code);
-        }
-        propagating = oldprop;
-        buildparent = oldparent;
+        if(buildparent) buildparent->setpos(*x, *y);
     });
 
-    void uichildren(uint *code)
+    ICOMMANDNS(0, "uiposition-", uiposition_, "ff", (float *x, float *y),
     {
-        if(!buildparent) return;
-        bool oldprop = propagating;
-        propagating = true;
-        executeret(code);
-        Object *oldparent = buildparent;
-        loopv(oldparent->children)
-        {
-            buildparent = oldparent->children[i];
-            uichildren(code);
-        }
-        propagating = oldprop;
-        buildparent = oldparent;
+        if(buildparent) loopi(buildchild) buildparent->children[i]->setpos(*x, *y);
+    });
+
+    #define UICOLOURCMDS(t) \
+        if(o->iscolour()) \
+        { \
+            loopvk(((Colored *)o)->colors) ((Colored *)o)->colors[k] = Color(*c); \
+            t; \
+        } \
+
+    UIREVCMDC(setcolour, "i", (int *c), UICOLOURCMDS(break));
+    void setchildcolours(Object *o, int *c)
+    {
+        UICOLOURCMDS();
+        loopv(o->children) setchildcolours(o->children[i], c);
     }
-    ICOMMAND(0, uipropagate, "e", (uint *code), uichildren(code));
+    UIWINCMDC(setcolours, "i", (int *c), setchildcolours(o, c));
 
-    ICOMMAND(0, uiproproot, "e", (uint *code),
+    #define UIBLENDCMDS(t) \
+        if(o->iscolour()) \
+        { \
+            loopvk(((Colored *)o)->colors) ((Colored *)o)->colors[k].a = clamp(int(*c * ((Colored *)o)->colors[k].a), 0, 255); \
+            t; \
+        } \
+
+    UIREVCMDC(changeblend, "f", (float *c), UIBLENDCMDS(break));
+    void changechildblends(Object *o, float *c)
     {
-        if(!buildparent) return;
-        Object *oldparent = buildparent;
-        buildparent = window;
-        uichildren(code);
-        buildparent = oldparent;
-    });
+        UIBLENDCMDS();
+        loopv(o->children) changechildblends(o->children[i], c);
+    }
+    UIWINCMDC(changeblends, "f", (float *c), changechildblends(o, c));
 
-    ICOMMAND(0, uialign, "ii", (int *xalign, int *yalign), if(buildparent) buildparent->setalign(*xalign, *yalign));
-    ICOMMAND(0, uiclamp, "iiii", (int *left, int *right, int *top, int *bottom), if(buildparent) buildparent->setclamp(*left, *right, *top, *bottom));
-    ICOMMAND(0, uiposition, "ff", (float *x, float *y), if(buildparent) buildparent->setpos(*x, *y));
+    #define UICHGCOLCMDS(t) \
+        if(o->iscolour()) \
+        { \
+            loopvk(((Colored *)o)->colors) \
+            { \
+                ((Colored *)o)->colors[k].r = clamp(int(*c * ((Colored *)o)->colors[k].r), 0, 255); \
+                ((Colored *)o)->colors[k].g = clamp(int(*c * ((Colored *)o)->colors[k].g), 0, 255); \
+                ((Colored *)o)->colors[k].b = clamp(int(*c * ((Colored *)o)->colors[k].b), 0, 255); \
+            } \
+            t; \
+        } \
 
-    #define UIGETFVAL(vname) \
-        ICOMMAND(0, ui##vname, "N$", (int *numargs, ident *id), { \
-            if(*numargs != 0) floatret(buildparent ? buildparent->vname : 0.f); \
-            else printvar(id, buildparent ? buildparent->vname : 0.f); \
-        }); \
-        ICOMMAND(0, ui##vname##prev, "N$", (int *numargs, ident *id), { \
-            if(*numargs != 0) floatret(buildparent && buildparent->buildchild > 0 ? buildparent->children[buildparent->buildchild-1]->vname : 0.f); \
-            else printvar(id, buildparent && buildparent->buildchild > 0 ? buildparent->children[buildparent->buildchild-1]->vname : 0.f); \
-        });
-
-    UIGETFVAL(lastx);
-    UIGETFVAL(lasty);
-    UIGETFVAL(lastsx);
-    UIGETFVAL(lastsy);
-    UIGETFVAL(lastw);
-    UIGETFVAL(lasth);
-
-    int hasinput(bool cursor, int stype)
+    UIREVCMDC(changecolour, "f", (float *c), UICHGCOLCMDS(break));
+    void changechildcolours(Object *o, float *c)
     {
-        int ret = 0;
-        SWSURFACE(stype,
-        {
-            int val = surface->allowinput(cursor);
-            ret = max(val, ret);
-        });
-        return ret;
+        UICHGCOLCMDS();
+        loopv(o->children) changechildcolours(o->children[i], c);
+    }
+    UIWINCMDC(changecolours, "f", (float *c), changechildcolours(o, c));
+
+    #define UIROTCOLCMDS(t) \
+        if(o->iscolour()) \
+        { \
+            ((Colored *)o)->rotatecolors(*amt, *start, *count); \
+            t; \
+        } \
+
+    UIREVCMDC(rotatecolour, "fii", (float *amt, int *start, int *count), UIROTCOLCMDS(break));
+    void rotchildcolours(Object *o, float *amt, int *start, int *count)
+    {
+        UIROTCOLCMDS();
+        loopv(o->children) rotchildcolours(o->children[i], amt, start, count);
+    }
+    UIWINCMDC(rotatecolours, "fii", (float *amt, int *start, int *count), rotchildcolours(o, amt, start, count));
+
+    bool hasinput()
+    {
+        return world->allowinput();
     }
 
-    ICOMMANDV(0, uihasinput, hasinput());
-    ICOMMAND(0, uigetinput, "ib", (int *cursor, int *stype), intret(hasinput(*cursor != 0, *stype >= 0 ? *stype : -1)));
-
-    bool hasmenu(bool pass, int stype)
+    bool hasmenu(bool pass)
     {
-        bool ret = false;
-        SWSURFACE(stype, if(surface->hasmenu(pass)) ret = true);
-        return ret;
+        return world->hasmenu(pass);
     }
-
-    ICOMMANDV(0, uihasmenu, hasmenu());
-    ICOMMAND(0, uigetmenu, "ib", (int *pass, int *stype), intret(hasmenu(*pass != 0, *stype >= 0 ? *stype : -1)));
 
     bool keypress(int code, bool isdown)
     {
-        if(!pushsurface(surfaceinput)) return false;
-
-        if(surface->rawkey(code, isdown))
-        {
-            popsurface();
-            return true;
-        }
-
+        if(world->rawkey(code, isdown)) return true;
         int action = 0, hold = 0;
         switch(code)
         {
@@ -7290,735 +4477,84 @@ namespace UI
             case -4: action = STATE_SCROLL_UP; break;
             case -5: action = STATE_SCROLL_DOWN; break;
         }
-
-        int setmode = inputsteal && action != STATE_SCROLL_UP && action != STATE_SCROLL_DOWN ? SETSTATE_FOCUSED : SETSTATE_INSIDE;
-
         if(action)
         {
             if(isdown)
             {
-                if(hold) surface->clearstate(hold);
-                if(surface->setstate(action, getuicursorx(false), getuicursory(), 0, setmode, action|hold))
-                {
-                    popsurface();
-                    return true;
-                }
+                if(hold) world->clearstate(hold);
+                if(world->setstate(action, cursorx, cursory, 0, true, action|hold)) return true;
             }
             else if(hold)
             {
-                if(surface->setstate(action, getuicursorx(false), getuicursory(), hold, setmode, action))
+                if(world->setstate(action, cursorx, cursory, hold, true, action))
                 {
-                    surface->clearstate(hold);
-                    popsurface();
+                    world->clearstate(hold);
                     return true;
                 }
-                else surface->clearstate(hold);
+                world->clearstate(hold);
             }
         }
-
-        bool ret = surface->key(code, isdown);
-        popsurface();
-
-        return ret;
+        return world->key(code, isdown);
     }
 
     bool textinput(const char *str, int len)
     {
-        if(!pushsurface(surfaceinput)) return false;
-
-        bool ret = surface->textinput(str, len);
-
-        popsurface();
-
-        return ret;
-    }
-
-    void closemapuis(int n, int stype)
-    {
-        if(n < 0) return;
-
-        loopi(SURFACE_LOOP)
-        {
-            if(i == stype || !pushsurface(i)) continue;
-
-            enumerate(surface->windows, Window *, w,
-            {
-                if(w->args[0].getint() != n || strncmp(w->name, "entity_", 7)) continue;
-                surface->hide(w);
-            });
-
-            popsurface();
-        }
-    }
-
-    void checkmapuis()
-    {
-        int oldflags = identflags;
-        identflags |= IDF_MAP;
-
-        vector<extentity *> &ents = entities::getents();
-        loopenti(ET_MAPUI)
-        {
-            extentity &e = *ents[i];
-            if(e.type != ET_MAPUI || !entities::isallowed(e)) continue;
-
-            physent *player = (physent *)game::focusedent(true);
-            if(!player) player = camera1;
-            bool inside = e.attrs[4] > 0 && e.attrs[1]&MAPUI_PROXIMITY ? player->o.dist(e.o) <= e.attrs[4] : true;
-
-            if(!inside && e.attrs[1]&MAPUI_SHOWPROX) continue;
-
-            int stype = SURFACE_WORLD;
-            if(e.attrs[1]&MAPUI_VISOR) stype = SURFACE_VISOR;
-            else if(e.attrs[1]&MAPUI_BACKGROUND) stype = SURFACE_BACKGROUND;
-            else if(e.attrs[1]&MAPUI_FOREGROUND) stype = SURFACE_FOREGROUND;
-
-            vec pos = e.o;
-            float yaw = 0, pitch = 0;
-            if(entities::getdynamic(e, pos, &yaw, &pitch))
-            {
-                if(e.attrs[2] >= 0)
-                {
-                    yaw += e.attrs[2];
-                    if(yaw < 0.0f) yaw = 360.0f - fmodf(-yaw, 360.0f);
-                    else if(yaw >= 360.0f) yaw = fmodf(yaw, 360.0f);
-                }
-
-                if(e.attrs[3] <= 180 || e.attrs[3] >= -180)
-                {
-                    pitch += e.attrs[3];
-                    if(pitch < -180.0f) pitch = 180.0f - fmodf(-180.0f - pitch, 360.0f);
-                    else if(pitch >= 180.0f) pitch = fmodf(pitch + 180.0f, 360.0f) - 180.0f;
-                }
-            }
-            else
-            {
-                yaw = e.attrs[2] >= 0 ? e.attrs[2] : 0;
-                pitch = e.attrs[3] <= 180 && e.attrs[3] >= -180 ? e.attrs[3] : 0;
-            }
-
-            defformatstring(name, "entity_%s%d", e.attrs[0] < 0 ? "builtin_" : "", abs(e.attrs[0]));
-            if(UI::pokeui(name, stype, i, pos, uimapmaxdist, yaw, pitch, e.attrs[5] != 0 ? e.attrs[5]/100.f : 1.f, e.attrs[6] > 0 ? e.attrs[6] : 0.f, e.attrs[7] > 0 ? e.attrs[7] : 0.f))
-            {
-                if(pushsurface(stype))
-                {
-                    Window *w = dynuirefwin(name, i);
-                    if(w) w->allowinput = inside && (e.attrs[1]&MAPUI_INPUTPROX) != 0 ? 1 : 0;
-                    popsurface();
-                }
-            }
-        }
-
-        identflags = oldflags;
-    }
-
-    #define COMPOSITESIZE (1<<9) // xs/ys scale
-    extern void reloadcomp();
-    VARF(IDF_PERSIST, compositesize, 1<<1, COMPOSITESIZE, 1<<12, reloadcomp());
-    VAR(IDF_PERSIST, compositeuprate, 0, 16, VAR_MAX); // limit updates to this ms
-    VAR(IDF_PERSIST, compositeruncount, 0, 2, VAR_MAX); // limit updates to this count per cycle
-    VAR(IDF_PERSIST, compositerewind, 0, 1, 1); // rewind if over time limit
-
-    GLenum compformat(int format = -1)
-    {
-        switch(format)
-        {
-            case 1: return GL_RED;
-            case 2: return GL_RG;
-            case 3: return GL_RGB;
-            case 4: return GL_RGBA;
-            default: break;
-        }
-
-        return GL_RGBA;
-    }
-
-    int formatcomp(GLenum format)
-    {
-        switch(format)
-        {
-            case GL_RED: return 1;
-            case GL_RG: return 2;
-            case GL_RGB: return 3;
-            case GL_RGBA: return 4;
-        }
-
-        return 4;
-    }
-
-    Texture *composite(const char *name, int tclamp, bool mipit, bool msg, bool gc, Texture *tex, bool reload)
-    {
-        if(!name || !*name || !pushsurface(SURFACE_COMPOSITE))
-        {
-            if(msg) conoutf(colourred, "Cannot create null composite texture: %s", name);
-            popsurface();
-            return notexture; // need a name
-        }
-
-        Texture *t = tex ? tex : textures.access(name);
-        if(t && !reload)
-        {
-            // Strip GC flag with gc=false
-            if(!gc && t->type&Texture::GC) t->type &= ~Texture::GC;
-            popsurface();
-            return t;
-        }
-
-        const char *cmds = NULL, *file = name;
-        if(name && name[0] == '<')
-        {
-            cmds = name;
-            file = strchr(name, '>');
-            if(file) file++;
-            if(!file || !*file)
-            {
-                if(msg) conoutf(colourred, "Cannot create null composite texture: %s", name);
-                popsurface();
-                return notexture; // need a name
-            }
-        }
-
-        bool iscomposite = false;
-        float ssize = 0;
-        int delay = 0, bpp = -1;
-        if(cmds && *cmds == '<')
-        {
-            #define COMPNUMARGS 3
-            const char *cmd = NULL, *end = NULL, *arg[COMPNUMARGS] = { NULL, NULL, NULL };
-            cmd = &cmds[1];
-            end = strchr(cmd, '>');
-            if(end)
-            {
-                size_t len = strcspn(cmd, ":,><");
-                loopi(COMPNUMARGS)
-                {
-                    arg[i] = strchr(i ? arg[i-1] : cmd, i ? ',' : ':');
-                    if(!arg[i] || arg[i] >= end) arg[i] = "";
-                    else arg[i]++;
-                }
-                if(matchstring(cmd, len, "comp"))
-                {
-                    if(*arg[0]) delay = max(atoi(arg[0]), 0);
-                    if(*arg[1]) ssize = atof(arg[1]);
-                    if(*arg[2]) bpp = clamp(atoi(arg[2]), 0, 4);
-                    iscomposite = true;
-                }
-            }
-            #undef COMPNUMARGS
-        }
-
-        if(!iscomposite)
-        {
-            if(msg) conoutf(colourred, "Not a composite texture: %s", name);
-            popsurface();
-            return notexture;
-        }
-
-        vector<char *> list;
-        explodelist(file, list, 5); // name [delay] args [size] [bpp]
-
-        if(list.empty()) // need at least the name
-        {
-            list.deletearrays();
-            if(msg) conoutf(colourred, "Could not composite texture: %s", name);
-            popsurface();
-            return notexture;
-        }
-
-        int argidx = 1;
-        if(list.length() >= 2 && isdigit(list[1][0]))
-        { // Import from old style
-            argidx = 2;
-            delay = max(atoi(list[1]), 0);
-            if(list.length() >= 4) ssize = atof(list[3]);
-            if(list.length() >= 5) bpp = clamp(atoi(list[3]), 0, 4);
-        }
-
-        char *cname = list[0], *args = list.length() >= (argidx + 1) ? list[argidx] : NULL;
-        int tsize = ssize >= 0 ? int(ssize * compositesize) : abs(int(ssize));
-        if(tsize <= 0) tsize = compositesize;
-        else if(tsize < 1<<1) tsize = 1<<1;
-
-        if(msg) progress(0, "Compositing texture: %s (%s)", cname, args && *args ? args : "-");
-
-        Window *w = surface->windows.find(cname, NULL);
-        if(!w)
-        {
-            if(msg) conoutf(colourred, "Failed to locate composite UI: %s (%s)", cname, name);
-            list.deletearrays();
-            popsurface();
-            return notexture;
-        }
-
-        GLint oldfbo = renderfbo; // necessary as a texture can load at pretty much any point in the frame
-        poke(true);
-
-        GLERROR;
-        GLuint fbo = t ? t->fbo : 0;
-        if(fbo)
-        {
-            glDeleteFramebuffers_(1, &fbo);
-            fbo = 0;
-        }
-        glGenFramebuffers_(1, &fbo);
-        glBindFramebuffer_(GL_FRAMEBUFFER, fbo);
-        renderfbo = fbo;
-
-        GLenum format = compformat(bpp);
-        GLuint id = t ? t->id : 0;
-        if(id)
-        {
-            glDeleteTextures(1, &id);
-            id = 0;
-        }
-        glGenTextures(1, &id);
-        createtexture(id, tsize, tsize, NULL, tclamp, mipit ? 3 : 0, format, GL_TEXTURE_2D, 0, 0, 0, true, format, true);
-
-        glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, id, 0);
-
-        GLERROR;
-        if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        {
-            if(msg) conoutf(colourred, "Failed allocating composite texture framebuffer: %s [%u / %u]", name, id, fbo);
-            if(id) glDeleteTextures(1, &id);
-            if(fbo) glDeleteFramebuffers_(1, &fbo);
-            glBindFramebuffer_(GL_FRAMEBUFFER, oldfbo);
-            renderfbo = oldfbo;
-
-            list.deletearrays();
-            popsurface();
-
-            return notexture;
-        }
-
-        glViewport(0, 0, tsize, tsize);
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        if(!t)
-        {
-            char *key = newstring(name);
-            t = &textures[key];
-            t->name = key;
-            t->comp = newstring(cname);
-            t->args = args ? newstring(args) : NULL;
-        }
-        t->type = Texture::IMAGE | Texture::COMPOSITE | Texture::ALPHA;
-        t->tclamp = tclamp;
-        t->mipmap = mipit;
-        if(gc) t->type |= Texture::GC;
-        if(t->tclamp&0x300) t->type |= Texture::MIRROR;
-        t->w = t->h = tsize;
-        t->xs = t->ys = ssize >= 0 ? int(t->w * (COMPOSITESIZE / float(t->w))) : t->w;
-        t->bpp = formatsize(format);
-        t->format = format;
-        t->delay = delay;
-        t->id = id;
-        t->fbo = fbo;
-        t->used = t->last = uiclockticks;
-
-        bool hastex = false;
-        loopv(surface->texs)
-        {
-            if(surface->texs[i] != t) continue;
-            hastex = true;
-            break;
-        }
-        if(!hastex) surface->texs.add(t);
-
-        if(t->mipmap)
-        {
-            glActiveTexture_(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, t->id);
-            glGenerateMipmap_(GL_TEXTURE_2D);
-        }
-
-        glBindFramebuffer_(GL_FRAMEBUFFER, oldfbo);
-        renderfbo = oldfbo;
-        glViewport(0, 0, hudw, hudh);
-
-        if(msg) progress(1, "Compositing texture: %s (%s)", cname, args && *args ? args : "-");
-
-        list.deletearrays();
-        popsurface();
-
-        return t;
-    }
-
-    void reloadcomp()
-    {
-        enumerate(textures, Texture, t,
-        {
-            if(!(t.type&Texture::COMPOSITE)) continue;
-            composite(t.name, t.tclamp, t.mipmap, true, t.type&Texture::GC, &t, true);
-            t.rendered = 0;
-        });
-    }
-
-    void mousetrack(float dx, float dy)
-    {
-        loopi(SURFACE_MAX) if(surfaces[i]) surfaces[i]->mousetrackvec.add(vec2(dx, dy));
-    }
-
-    bool cursorlock()
-    {
-        if(surfaces[surfaceinput]) return surfaces[surfaceinput]->lockcursor;
-        return false;
-    }
-
-    int cursortype()
-    {
-        if(surfaces[surfaceinput]) return surfaces[surfaceinput]->cursortype;
-        return CURSOR_DEFAULT;
-    }
-
-    int savemap(stream *h)
-    {
-        int mapmenus = 0;
-        loopj(SURFACE_MAX)
-        {
-            if(j == SURFACE_PROGRESS || !pushsurface(j)) continue;
-
-            enumerate(surface->windows, Window *, w,
-            {
-                if(!w->mapdef || !w->contents || w->dyn) continue;
-
-                h->printf("mapui %s %d [%s]", w->name, surfacetype, w->contents->body);
-
-                if(w->onshow)
-                    h->printf(" [%s]", w->onshow->body);
-                else if(w->onhide || w->vistest || w->forcetest) h->printf(" []");
-
-                if(w->onhide)
-                    h->printf(" [%s]", w->onhide->body);
-                else if(w->vistest || w->forcetest) h->printf(" []");
-
-                if(w->vistest)
-                    h->printf(" [%s]", w->vistest->body);
-                else if(w->forcetest) h->printf(" []");
-
-                if(w->forcetest)
-                    h->printf(" [%s]", w->forcetest->body);
-
-                h->printf("\n\n");
-
-                mapmenus++;
-            });
-
-            popsurface();
-        }
-
-        loopv(dynuis)
-        {
-            DynUI *d = dynuis[i];
-            if(!d->mapdef || !d->contents) continue;
-
-            h->printf("mapdynui %s [%s]", d->name, d->contents);
-
-            if(d->onshow)
-                h->printf(" [%s]", d->onshow);
-            else if(d->onhide || d->vistest || d->forcetest) h->printf(" []");
-
-            if(d->onhide)
-                h->printf(" [%s]", d->onhide);
-            else if(d->vistest || d->forcetest) h->printf(" []");
-
-            if(d->vistest)
-                h->printf(" [%s]", d->vistest);
-            else if(d->forcetest) h->printf(" []");
-
-            if(d->forcetest)
-                h->printf(" [%s]", d->forcetest);
-
-            h->printf("\n\n");
-
-            mapmenus++;
-        }
-
-        return mapmenus;
-    }
-
-    void resetmap()
-    {
-        loopj(SURFACE_MAX)
-        {
-            if(j == SURFACE_PROGRESS || !pushsurface(j)) continue;
-            if(j == SURFACE_COMPOSITE) loopvrev(surface->texs)
-            {
-                Texture *t = surface->texs[i];
-                if(!t->rendered) continue;
-                Window *w = surface->windows.find(t->comp, NULL);
-                if(!w || !w->mapdef) continue;
-
-                surface->texs.remove(i);
-                t->type |= Texture::GC;
-                cleanuptexture(t);
-            }
-            enumerate(surface->windows, Window *, w,
-            {
-                if(!w->mapdef) continue;
-                surface->hide(w);
-                surface->windows.remove(w->name);
-                delete w;
-            });
-            popsurface();
-        }
-
-        loopvrev(dynuis)
-        {
-            DynUI *d = dynuis[i];
-            if(!d->mapdef) continue;
-            dynuis.remove(i);
-            delete d;
-        }
+        return world->textinput(str, len);
     }
 
     void setup()
     {
-        loopi(MAXARGS)
-        {
-            defformatstring(argname, "uiarg%d", i+1);
-            ident *id = newident(argname, IDF_ARG);
-            id->forcenull();
-            uiargs.add(id);
-        }
-
-        surfacestack.setsize(0);
-        loopi(SURFACE_MAX) surfaces[i] = new Surface(i);
-
-        surface = NULL;
-        inputsteal = NULL;
-        viewports.deletecontents();
+        world = new World;
     }
 
     void cleanup()
     {
-        loopvrev(dynuis)
-        {
-            DynUI *d = dynuis[i];
-            dynuis.remove(i);
-            delete d;
-        }
-
-        loopj(SURFACE_MAX)
-        {
-            if(!pushsurface(j)) continue;
-            surface->hideall(true);
-            surface->children.setsize(0);
-            enumerate(surface->windows, Window *, w, delete w);
-            surface->windows.clear();
-            popsurface();
-        }
-
-        surface = NULL;
-        inputsteal = NULL;
-        surfacestack.setsize(0);
-        loopi(SURFACE_MAX) DELETEP(surfaces[i]);
-        viewports.deletecontents();
+        world->children.setsize(0);
+        enumerate(windows, Window *, w, delete w);
+        windows.clear();
+        DELETEP(world);
     }
 
-    void cleangl()
+    void calctextscale()
     {
-        Image::lasttex = NULL;
-
-        loopj(SURFACE_MAX)
-        {
-            if(!pushsurface(j)) continue;
-            surface->hideall(true);
-            loopv(surface->texs) surface->texs[i]->cleanup();
-            surface->texs.setsize(0);
-            popsurface();
-        }
-        viewports.deletecontents();
-    }
-
-    static inline bool texsort(Texture *a, Texture *b)
-    {
-        if(!a->paused(uiclockticks) && b->paused(uiclockticks)) return true;
-        if(a->paused(uiclockticks) && !b->paused(uiclockticks)) return false;
-        if(a->last < b->last) return true;
-        if(a->last > b->last) return false;
-        return false;
-    }
-
-    void updatetextures()
-    {
-        if(!pushsurface(SURFACE_COMPOSITE)) return;
-
-        bool found = false;
-        int oldhudw = hudw, oldhudh = hudh, oldsf = surfaceformat;
-        GLuint oldfbo = renderfbo;
-
-        poke(true);
-
-        int processed = 0;
-        if(compositeruncount) surface->texs.sort(texsort);
-
-        loopv(surface->texs)
-        {
-            Texture *t = surface->texs[i];
-
-            if(t->rendered >= 2 && compositeruncount > 0 && processed >= compositeruncount) continue;
-
-            int delay = 0, elapsed = t->update(delay, uiclockticks, compositeuprate);
-            if(t->rendered >= 2 && elapsed < 0) continue;
-
-            found = true;
-
-            poke(false);
-
-            if(delay >= 0 && compositerewind)
-            {
-                uicurtime = elapsed;
-
-                int offset = delay > 1 ? elapsed % delay : delay;
-                if(offset > 0)
-                {
-                    uilastmillis -= int(offset * timescale / 100.f);
-                    uitotalmillis -= offset;
-                }
-            }
-
-            GLERROR;
-            if(!t->fbo) glGenFramebuffers_(1, &t->fbo);
-            glBindFramebuffer_(GL_FRAMEBUFFER, t->fbo);
-            renderfbo = t->fbo;
-
-            if(!t->id)
-            {
-                if(!t->format) t->format = compformat();
-                glGenTextures(1, &t->id);
-                createtexture(t->id, t->w, t->w, NULL, t->tclamp, t->mipmap ? 3 : 0, t->format, GL_TEXTURE_2D, 0, 0, 0, true, t->format, true);
-                glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->id, 0);
-            }
-
-            GLERROR;
-            if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            {
-                conoutf(colourred, "Failed rendering composite texture framebuffer: %s [%u / %u]", t->name, t->id, t->fbo);
-                continue;
-            }
-
-            hudw = hudh = t->w;
-            glViewport(0, 0, hudw, hudh);
-            glClearColor(0, 0, 0, 0);
-            glClear(GL_COLOR_BUFFER_BIT);
-            surfaceformat = formatcomp(t->format);
-
-            Window *w = surface->windows.find(t->comp, NULL);
-            if(w)
-            {
-                w->setarg(t->args ? t->args : "", -1);
-
-                surface->show(w);
-                surface->build();
-                surface->render();
-
-                if(t->mipmap)
-                {
-                    glActiveTexture_(GL_TEXTURE0);
-                    glBindTexture(GL_TEXTURE_2D, t->id);
-                    glGenerateMipmap_(GL_TEXTURE_2D);
-                }
-
-                surface->hide(w);
-            }
-
-            t->last = uiclockticks;
-
-            if(t->rendered < 2) t->rendered++;
-            else if(delay < 0)
-            { // don't need to keep stuff we're not going to continue using it
-                if(t->fbo)
-                {
-                    glDeleteFramebuffers_(1, &t->fbo);
-                    t->fbo = 0;
-                }
-                surface->texs.remove(i--);
-            }
-
-            processed++;
-        }
-
-        popsurface();
-        poke(false);
-
-        if(found)
-        {
-            hudw = oldhudw;
-            hudh = oldhudh;
-            surfaceformat = oldsf;
-            glBindFramebuffer_(GL_FRAMEBUFFER, oldfbo);
-            renderfbo = oldfbo;
-            glViewport(0, 0, hudw, hudh);
-        }
-    }
-    ICOMMANDV(0, compositecount, surfaces[SURFACE_COMPOSITE] ? surfaces[SURFACE_COMPOSITE]->texs.length() : 0);
-
-    static const int surforder[SURFACE_ALL] = { SURFACE_FOREGROUND, SURFACE_VISOR, SURFACE_BACKGROUND, SURFACE_WORLD };
-
-    void poke(bool ticks)
-    {
-        uilastmillis = lastmillis;
-        uitotalmillis = totalmillis;
-        if(ticks)
-        {
-            uiclockmillis = getclockmillis();
-            uiclockticks = getclockticks();
-        }
-        uicurtime = curtime;
-
-        int oldinput = surfaceinput;
-        loopi(SURFACE_ALL)
-        {
-            Surface *s = surfaces[surforder[i]];
-            if(!s || !s->allowinput(true, true)) continue;
-            surfaceinput = s->type;
-            break;
-        }
-        if(oldinput != surfaceinput) inputsteal = NULL;
+        uitextscale = 1.0f/uitextrows;
     }
 
     void update()
     {
-        checkmapuis();
-    }
-
-    void build(bool noview)
-    {
         if(uihidden) return;
-
+        float oldtextscale = curtextscale;
+        curtextscale = 1;
+        cursortype = CURSOR_DEFAULT;
+        pushfont("default");
         readyeditors();
 
-        loopi(SURFACE_ALL)
-        {
-            if((i == SURFACE_WORLD && noview) || !pushsurface(i))
-                continue; // skip world UI's when in noview
+        world->setstate(STATE_HOVER, cursorx, cursory, world->childstate&STATE_HOLD_MASK);
+        if(world->childstate&STATE_HOLD) world->setstate(STATE_HOLD, cursorx, cursory, STATE_HOLD, false);
+        if(world->childstate&STATE_ALT_HOLD) world->setstate(STATE_ALT_HOLD, cursorx, cursory, STATE_ALT_HOLD, false);
+        if(world->childstate&STATE_ESC_HOLD) world->setstate(STATE_ESC_HOLD, cursorx, cursory, STATE_ESC_HOLD, false);
 
-            surface->build();
-            surface->init();
+        calctextscale();
 
-            popsurface();
-        }
+        if(*uiprecmd) execute(uiprecmd);
+        world->build();
+        if(*uipostcmd) execute(uipostcmd);
 
         flusheditors();
+        popfont();
+        curtextscale = oldtextscale;
     }
 
-    void render(int stype)
+    void render()
     {
-        if(uihidden || !pushsurface(stype)) return;
-
-        if(surfacetype == SURFACE_PROGRESS)
-        {
-            if(!pokeui("default", SURFACE_PROGRESS))
-            {
-                popsurface();
-                return;
-            }
-            surface->build();
-        }
-        surface->render();
-
-        popsurface();
+        if(uihidden) return;
+        float oldtextscale = curtextscale;
+        curtextscale = 1;
+        pushfont("default");
+        world->layout();
+        world->adjustchildren();
+        world->draw();
+        popfont();
+        curtextscale = oldtextscale;
     }
 }

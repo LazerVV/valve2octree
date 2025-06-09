@@ -60,7 +60,8 @@ struct skelbih
     float v = ray.dot(q) / det; \
     if(v < 0 || u + v > 1) return false; \
     float f = ec.dot(q) / det; \
-    if(f < 0 || f*skelmodel::intersectscale > skelmodel::intersectdist || tm->noclip) return false; \
+    if(f < 0 || f*skelmodel::intersectscale > skelmodel::intersectdist) return false; \
+    if(!(skelmodel::intersectmode&RAY_SHADOW) && tm->noclip) return false; \
     if((skelmodel::intersectmode&RAY_ALPHAPOLY)==RAY_ALPHAPOLY) \
     { \
         Texture *tex = s[t.mesh].tex; \
@@ -827,10 +828,10 @@ void skelhitdata::build(skelmodel::skelmeshgroup *g, const uchar *ids)
     delete[] bounds;
 }
 
-void skelmodel::skelmeshgroup::buildhitdata(const uchar *collidezones)
+void skelmodel::skelmeshgroup::buildhitdata(const uchar *hitzones)
 {
     if(hitdata) return;
     hitdata = new skelhitdata;
-    hitdata->build(this, collidezones);
+    hitdata->build(this, hitzones);
 }
 

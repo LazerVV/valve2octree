@@ -12,7 +12,7 @@ def write_redeclipse_map(filename: str) -> None:
         header = struct.pack(
             "<4sii7i4s",
             b"MAPZ",    # magic
-            55,         # MAPVERSION from engine/world.h
+            45,         # MAPVERSION from engine/world.h
             44,         # sizeof(mapz)
             512,        # worldsize (2^9)
             1,          # numents

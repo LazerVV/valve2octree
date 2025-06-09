@@ -10,9 +10,7 @@ namespace gle
         ATTRIB_TANGENT      = 5,
         ATTRIB_BONEWEIGHT   = 6,
         ATTRIB_BONEINDEX    = 7,
-        ATTRIB_HINTCOLOR    = 8,
-        ATTRIB_HINTBLEND    = 9,
-        MAXATTRIBS          = 10
+        MAXATTRIBS          = 8
     };
 
     extern const char * const attribnames[MAXATTRIBS];
@@ -24,6 +22,7 @@ namespace gle
 
     extern void begin(GLenum mode);
     extern void begin(GLenum mode, int numverts);
+    extern void multidraw();
     extern void defattribs(const char *fmt);
     extern void defattrib(int type, int size, int format);
 
@@ -38,8 +37,6 @@ namespace gle
     GLE_DEFATTRIB(tangent, ATTRIB_TANGENT, 4, GL_FLOAT)
     GLE_DEFATTRIB(boneweight, ATTRIB_BONEWEIGHT, 4, GL_UNSIGNED_BYTE)
     GLE_DEFATTRIB(boneindex, ATTRIB_BONEINDEX, 4, GL_UNSIGNED_BYTE)
-    GLE_DEFATTRIB(hintcolor, ATTRIB_HINTCOLOR, 3, GL_FLOAT)
-    GLE_DEFATTRIB(hintblend, ATTRIB_HINTCOLOR, 2, GL_FLOAT)
 
     #define GLE_INITATTRIB(name, index, suffix, type) \
         static inline void name##suffix(type x) { glVertexAttrib1##suffix##_(index, x); } \
@@ -57,9 +54,9 @@ namespace gle
 
     GLE_INITATTRIBF(vertex, ATTRIB_VERTEX)
     GLE_INITATTRIBF(color, ATTRIB_COLOR)
+    GLE_INITATTRIBN(color, ATTRIB_COLOR, ub, uchar, 255)
+    static inline void color(const bvec &v, uchar alpha = 255) { glVertexAttrib4Nub_(ATTRIB_COLOR, v.x, v.y, v.z, alpha); }
     static inline void color(const bvec4 &v) { glVertexAttrib4Nubv_(ATTRIB_COLOR, v.v); }
-    static inline void color(const bvec &v, uchar alpha = 255) { color(bvec4(v, alpha)); }
-    static inline void colorub(uchar x, uchar y, uchar z, uchar w = 255) { color(bvec4(x, y, z, w)); }
     GLE_INITATTRIBF(texcoord0, ATTRIB_TEXCOORD0)
     GLE_INITATTRIBF(texcoord1, ATTRIB_TEXCOORD1)
     static inline void normal(float x, float y, float z) { glVertexAttrib4f_(ATTRIB_NORMAL, x, y, z, 0.0f); }
@@ -67,12 +64,6 @@ namespace gle
     static inline void tangent(float x, float y, float z, float w = 1.0f) { glVertexAttrib4f_(ATTRIB_TANGENT, x, y, z, w); }
     static inline void tangent(const vec &v, float w = 1.0f) { glVertexAttrib4f_(ATTRIB_TANGENT, v.x, v.y, v.z, w); }
     static inline void tangent(const vec4 &v) { glVertexAttrib4fv_(ATTRIB_TANGENT, v.v); }
-    GLE_INITATTRIBF(hintcolor, ATTRIB_HINTCOLOR)
-    static inline void hintcolor(const bvec4 &v) { glVertexAttrib4Nubv_(ATTRIB_HINTCOLOR, v.v); }
-    static inline void hintcolor(const bvec &v, uchar alpha = 255) { hintcolor(bvec4(v, alpha)); }
-    static inline void hintcolorub(uchar x, uchar y, uchar z, uchar w = 255) { hintcolor(bvec4(x, y, z, w)); }
-    GLE_INITATTRIBF(hintblend, ATTRIB_HINTBLEND)
-    static inline void hintblend(float v) { hintblendf(v, v > 0 ? 1.f/v : v); }
 
     #define GLE_ATTRIBPOINTER(name, index, defaultnormalized, defaultsize, defaulttype, prepare) \
         static inline void enable##name() { prepare; glEnableVertexAttribArray_(index); } \
@@ -92,8 +83,6 @@ namespace gle
     GLE_ATTRIBPOINTER(tangent, ATTRIB_TANGENT, GL_TRUE, 4, GL_FLOAT, )
     GLE_ATTRIBPOINTER(boneweight, ATTRIB_BONEWEIGHT, GL_TRUE, 4, GL_UNSIGNED_BYTE, )
     GLE_ATTRIBPOINTER(boneindex, ATTRIB_BONEINDEX, GL_FALSE, 4, GL_UNSIGNED_BYTE, )
-    GLE_ATTRIBPOINTER(hintcolor, ATTRIB_HINTCOLOR, GL_TRUE, 4, GL_UNSIGNED_BYTE, )
-    GLE_ATTRIBPOINTER(hintblend, ATTRIB_HINTBLEND, GL_FALSE, 2, GL_FLOAT, )
 
     static inline void bindebo(GLuint ebo) { disable(); glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER, ebo); }
     static inline void clearebo() { glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER, 0); }
@@ -179,7 +168,6 @@ namespace gle
     static inline void attrib(const bvec &b, uchar w) { attribub(b.x, b.y, b.z, w); }
     static inline void attrib(const bvec4 &b) { attribub(b.x, b.y, b.z, b.w); }
 
-    extern void multidraw();
     extern int end();
 
     extern void enablequads();

@@ -2,9 +2,7 @@ struct gameent;
 
 namespace ai
 {
-    const int WAYPOINTVERSION   = 1;
     const int MAXWAYPOINTS      = USHRT_MAX - 2;
-    const int MAXWAYPOINTFILL   = MAXWAYPOINTS / 3;
     const int MAXWAYPOINTLINKS  = 6;
     const int WAYPOINTRADIUS    = 16;
 
@@ -21,18 +19,16 @@ namespace ai
     const float VIEWMIN         = 90.f;    // minimum field of view
     const float VIEWMAX         = 180.f;   // maximum field of view
 
-    extern int waypointversion;
     struct waypoint
     {
         vec o;
         float curscore, estscore;
-        int pull, drag, version;
+        int pull, drag;
         ushort route, prev;
         ushort links[MAXWAYPOINTLINKS];
-        bool saved;
 
         waypoint() {}
-        waypoint(const vec &o, int p = 0, int v = -1, bool a = false) : o(o), pull(p), drag(0), version(v >= 0 ? v : WAYPOINTVERSION), route(0), saved(a) { memset(links, 0, sizeof(links)); }
+        waypoint(const vec &o, int p = 0) : o(o), pull(p), drag(0), route(0) { memset(links, 0, sizeof(links)); }
 
         int score() const { return int(curscore) + int(estscore); }
 
@@ -53,8 +49,6 @@ namespace ai
         bool haslinks() { return links[0]!=0; }
     };
     extern vector<waypoint> waypoints;
-
-    extern bool clipped(const vec &o, bool full = true);
 
     static inline bool iswaypoint(int n)
     {
@@ -175,8 +169,6 @@ namespace ai
         AI_T_AFFINITY,
         AI_T_ENTITY,
         AI_T_DROP,
-        AI_T_JUNK,
-        AI_T_HOME,
         AI_T_MAX
     };
 
@@ -195,7 +187,6 @@ namespace ai
         AI_O_STAND = 0,
         AI_O_CROUCH,
         AI_O_DANCE,
-        AI_O_HACKED,
         AI_O_MAX
     };
 
@@ -232,9 +223,9 @@ namespace ai
     {
         vector<aistate> state;
         vector<int> route;
-        vec target, spot, views, aimpos, bottom;
+        vec target, spot, views, aimrnd;
         int enemy, enemyseen, enemymillis, prevnodes[NUMPREVNODES], targnode, targlast, targtime, targseq,
-            lastrun, lastaction, lastcheck, jumpseed, blocktime, blockseq, blocklast, lastaimpos, lastmelee, lastturn, lastbottom;
+            lastrun, lastaction, lastcheck, jumpseed, blocktime, blockseq, lastaimrnd, lastmelee, lastturn;
         float targyaw, targpitch;
         bool dontmove, tryreset;
 
@@ -242,17 +233,17 @@ namespace ai
         {
             clean();
             reset();
-            loopk(3) views[k] = aimpos[k] = 0.f;
+            loopk(3) views[k] = aimrnd[k] = 0.f;
         }
         ~aiinfo() {}
 
         void clean()
         {
-            lastaction = lastcheck = enemyseen = enemymillis = 0;
-            blocktime = blockseq = blocklast = targtime = targseq = 0;
-            lastaimpos = lastmelee = lastturn = lastbottom = 0;
+            spot = target = vec(0, 0, 0);
+            lastaction = lastcheck = enemyseen = enemymillis = blocktime = blockseq = targtime = targseq = lastaimrnd = lastmelee = lastturn = 0;
             lastrun = jumpseed = lastmillis;
             targnode = targlast = enemy = -1;
+            targyaw = targpitch = 0;
         }
 
         void clear(bool tryit = false)
@@ -334,22 +325,20 @@ namespace ai
     extern float viewfieldx(int x = 101);
     extern float viewfieldy(int x = 101);
 
-    extern vec getbottom(gameent *d);
     extern bool targetable(gameent *d, gameent *e, bool solid = false);
     extern bool cansee(gameent *d, vec &x, vec &y, bool force = false, vec &targ = aitarget);
     extern bool altfire(gameent *d, gameent *e);
     extern int weappref(gameent *d);
 
-    extern void init(gameent *d, int at, int et, int on, int sk, int bn, char *name, int tm, int c1, int c2, int md, const char *vn, const char *mx, vector<int> &lweaps);
+    extern void init(gameent *d, int at, int et, int on, int sk, int bn, char *name, int tm, int cl, int md, int pt, const char *vn, vector<int> &lweaps);
 
     extern bool badhealth(gameent *d);
     extern int checkothers(vector<int> &targets, gameent *d = NULL, int state = -1, int targtype = -1, int target = -1, bool teams = false, int *members = NULL);
-    extern bool makeroute(gameent *d, aistate &b, int node, bool changed = true, int retries = 0, float dist = CLOSEDIST);
-    extern bool makeroute(gameent *d, aistate &b, const vec &pos, bool changed = true, int retries = 0, float dist = CLOSEDIST);
+    extern bool makeroute(gameent *d, aistate &b, int node, bool changed = true, int retries = 0);
+    extern bool makeroute(gameent *d, aistate &b, const vec &pos, bool changed = true, int retries = 0);
     extern bool randomnode(gameent *d, aistate &b, const vec &pos, float guard = ALERTMIN, float wander = ALERTMAX);
     extern bool randomnode(gameent *d, aistate &b, float guard = ALERTMIN, float wander = ALERTMAX);
     extern bool violence(gameent *d, aistate &b, gameent *e, int pursue = 0);
-
     extern bool patrol(gameent *d, aistate &b, const vec &pos, float guard = CLOSEDIST, float wander = FARDIST, int walk = 1, bool retry = false);
     extern bool defense(gameent *d, aistate &b, const vec &pos, float guard = CLOSEDIST, float wander = FARDIST, int walk = 0, int actoverride = -1);
 
