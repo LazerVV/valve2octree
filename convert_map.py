@@ -1,7 +1,7 @@
 import struct
 import gzip
 import re
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 MAP_VERSION = 45
 WORLD_SIZE = 512
@@ -19,22 +19,19 @@ ORIENT_INDEX = {
     'z+': 5,  # O_TOP
 }
 
-VOXEL_SIZE = 16  # 32x32x32 grid
-GRID_SIZE = WORLD_SIZE // VOXEL_SIZE
+MAX_DEPTH = 5  # octree depth
 
-# basic floor texture for the helper cubes used to avoid culling
 BASE_TEXTURE = "exx/base-crete01"
 
 pattern = re.compile(r"\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*([^\s]+)")
 
 class Brush:
     def __init__(self):
-        self.planes = []  # list of (points, texture)
+        self.planes: List[Tuple[Tuple[int,int,int], ...]] = []
         self.bounds = [None, None, None, None, None, None]
         self.textures: Dict[str, str] = {}
 
     def add_plane(self, pts, texture):
-        """Store plane points and map its normal to one of the cube sides."""
         self.planes.append((pts, texture))
         xs, ys, zs = zip(*pts)
         if self.bounds[0] is None:
@@ -47,7 +44,6 @@ class Brush:
             self.bounds[4] = min(self.bounds[4], min(zs))
             self.bounds[5] = max(self.bounds[5], max(zs))
 
-        # detect orientation via constant coordinate first
         orient = None
         if xs[0] == xs[1] == xs[2]:
             orient = 'x-'
@@ -57,12 +53,11 @@ class Brush:
             orient = 'z-'
 
         if orient is None:
-            # fall back to predominant normal component
-            v1 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2])
-            v2 = (pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2])
-            nx = v1[1] * v2[2] - v1[2] * v2[1]
-            ny = v1[2] * v2[0] - v1[0] * v2[2]
-            nz = v1[0] * v2[1] - v1[1] * v2[0]
+            v1 = (pts[1][0]-pts[0][0], pts[1][1]-pts[0][1], pts[1][2]-pts[0][2])
+            v2 = (pts[2][0]-pts[0][0], pts[2][1]-pts[0][1], pts[2][2]-pts[0][2])
+            nx = v1[1]*v2[2] - v1[2]*v2[1]
+            ny = v1[2]*v2[0] - v1[0]*v2[2]
+            nz = v1[0]*v2[1] - v1[1]*v2[0]
             ax, ay, az = abs(nx), abs(ny), abs(nz)
             if ax >= ay and ax >= az:
                 orient = 'x+' if nx > 0 else 'x-'
@@ -71,12 +66,11 @@ class Brush:
             else:
                 orient = 'z+' if nz > 0 else 'z-'
         else:
-            # determine sign based on plane order
-            v1 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2])
-            v2 = (pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2])
-            nx = v1[1] * v2[2] - v1[2] * v2[1]
-            ny = v1[2] * v2[0] - v1[0] * v2[2]
-            nz = v1[0] * v2[1] - v1[1] * v2[0]
+            v1 = (pts[1][0]-pts[0][0], pts[1][1]-pts[0][1], pts[1][2]-pts[0][2])
+            v2 = (pts[2][0]-pts[0][0], pts[2][1]-pts[0][1], pts[2][2]-pts[0][2])
+            nx = v1[1]*v2[2] - v1[2]*v2[1]
+            ny = v1[2]*v2[0] - v1[0]*v2[2]
+            nz = v1[0]*v2[1] - v1[1]*v2[0]
             if orient == 'x-' and nx > 0:
                 orient = 'x+'
             elif orient == 'y-' and ny > 0:
@@ -88,7 +82,6 @@ class Brush:
 
     def finalize(self):
         pass
-
 
 def parse_valve_map(fname: str) -> List[Brush]:
     brushes: List[Brush] = []
@@ -120,16 +113,15 @@ def parse_valve_map(fname: str) -> List[Brush]:
                     cur.add_plane(pts, texture)
     return brushes
 
-
 def parse_player_start(fname: str):
-    origin = (0.0, 0.0, 0.0)
+    origin = (0.0,0.0,0.0)
     angle = 0.0
     with open(fname) as f:
-        capture = False
+        capture=False
         for line in f:
-            s = line.strip()
+            s=line.strip()
             if s.startswith('// entity 1'):
-                capture = True
+                capture=True
                 continue
             if capture:
                 if s.startswith('//'):
@@ -138,9 +130,8 @@ def parse_player_start(fname: str):
                     parts = s.split('"')[3].split()
                     origin = tuple(float(p) for p in parts)
                 elif s.startswith('"angle"'):
-                    angle = float(s.split('"')[3])
-        return origin, angle
-
+                    angle=float(s.split('"')[3])
+        return origin,angle
 
 def collect_bounds(brushes: List[Brush]):
     xs=[];ys=[];zs=[]
@@ -151,88 +142,110 @@ def collect_bounds(brushes: List[Brush]):
         zs.extend([zmin,zmax])
     return min(xs),max(xs),min(ys),max(ys),min(zs),max(zs)
 
+class Leaf:
+    def __init__(self, depth:int, ix:int, iy:int, iz:int, start, end, textures:Dict[str,str]):
+        self.depth=depth
+        self.ix=ix; self.iy=iy; self.iz=iz
+        self.start=start
+        self.end=end
+        self.textures=textures
 
-def build_grid(brushes: List[Brush], offset):
-    grid = [[[{"solid":False, "tex":[0]*6} for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+def choose_depth(x0,x1,y0,y1,z0,z1):
+    for depth in range(0, MAX_DEPTH+1):
+        size=WORLD_SIZE>>depth
+        step=size//8
+        if all(v%step==0 for v in (x0,x1,y0,y1,z0,z1)):
+            if (x0//size)==((x1-1)//size) and (y0//size)==((y1-1)//size) and (z0//size)==((z1-1)//size):
+                return depth
+    return MAX_DEPTH
+
+def brushes_to_leaves(brushes: List[Brush], offset) -> List[Leaf]:
+    leaves=[]
     for b in brushes:
-        xmin,xmax,ymin,ymax,zmin,zmax = b.bounds
-        gx0 = int((xmin+offset[0])/VOXEL_SIZE)
-        gx1 = int((xmax+offset[0]-1)/VOXEL_SIZE)
-        gy0 = int((ymin+offset[1])/VOXEL_SIZE)
-        gy1 = int((ymax+offset[1]-1)/VOXEL_SIZE)
-        gz0 = int((zmin+offset[2])/VOXEL_SIZE)
-        gz1 = int((zmax+offset[2]-1)/VOXEL_SIZE)
+        xmin,xmax,ymin,ymax,zmin,zmax=b.bounds
+        x0=int(xmin+offset[0]); x1=int(xmax+offset[0])
+        y0=int(ymin+offset[1]); y1=int(ymax+offset[1])
+        z0=int(zmin+offset[2]); z1=int(zmax+offset[2])
+        depth=choose_depth(x0,x1,y0,y1,z0,z1)
+        size=WORLD_SIZE>>depth
+        step=size//8
+        ix=x0//size; iy=y0//size; iz=z0//size
+        start=[round((x0-ix*size)/step), round((y0-iy*size)/step), round((z0-iz*size)/step)]
+        end=[round((x1-ix*size)/step), round((y1-iy*size)/step), round((z1-iz*size)/step)]
+        start=[max(0,min(8,s)) for s in start]
+        end=[max(0,min(8,e)) for e in end]
+        leaves.append(Leaf(depth,ix,iy,iz,start,end,b.textures))
+    return leaves
 
-        for x in range(gx0, gx1 + 1):
-            for y in range(gy0, gy1 + 1):
-                for z in range(gz0, gz1 + 1):
-                    boundary = (
-                        x == gx0 or x == gx1 or
-                        y == gy0 or y == gy1 or
-                        z == gz0 or z == gz1
-                    )
-                    if not boundary:
-                        continue
-                    cell = grid[z][y][x]
-                    cell['solid'] = True
-                    for orient, tex in b.textures.items():
-                        idx = ORIENT_INDEX[orient]
-                        if orient == 'x-' and x == gx0:
-                            cell['tex'][idx] = tex
-                        elif orient == 'x+' and x == gx1:
-                            cell['tex'][idx] = tex
-                        elif orient == 'y-' and y == gy0:
-                            cell['tex'][idx] = tex
-                        elif orient == 'y+' and y == gy1:
-                            cell['tex'][idx] = tex
-                        elif orient == 'z-' and z == gz0:
-                            cell['tex'][idx] = tex
-                        elif orient == 'z+' and z == gz1:
-                            cell['tex'][idx] = tex
-    # add a solid base underneath the level so that the engine does not cull
-    # the interior of our generated voxels
-    base_thickness = 2  # two voxels ~= 32 units
-    for z in range(base_thickness):
-        for y in range(GRID_SIZE):
-            for x in range(GRID_SIZE):
-                cell = grid[z][y][x]
-                cell['solid'] = True
-                cell['tex'] = [BASE_TEXTURE]*6
-    return grid
-
-
-def gather_textures(grid):
+def gather_textures(leaves: List[Leaf]):
     names={'sky':0}
     next_index=1
-    for z in grid:
-        for y in z:
-            for cell in y:
-                for tex in cell['tex']:
-                    if isinstance(tex,str) and tex not in names:
-                        names[tex]=next_index
-                        next_index+=1
+    for leaf in leaves:
+        for tex in leaf.textures.values():
+            if tex not in names:
+                names[tex]=next_index
+                next_index+=1
+    names[BASE_TEXTURE]=names.get(BASE_TEXTURE,next_index)
+    if BASE_TEXTURE not in names:
+        names[BASE_TEXTURE]=next_index
     return names
 
+class Node:
+    def __init__(self):
+        self.children={}  # index -> Node
+        self.leaf: Leaf|None=None
 
-def encode_octree(grid, textures):
-    def encode(depth,x0,y0,z0):
-        if depth==0:
-            cell=grid[z0][y0][x0]
-            typ=2 if cell['solid'] else 1
-            tex=[textures.get(t,0) for t in cell['tex']]
-            return struct.pack('<B6H', typ, *tex)
+root=Node()
+
+def insert_leaf(leaf:Leaf):
+    node=root
+    for d in range(leaf.depth):
+        shift=MAX_DEPTH-1-d
+        idx=((leaf.ix>>shift)&1) | (((leaf.iy>>shift)&1)<<1) | (((leaf.iz>>shift)&1)<<2)
+        if idx not in node.children:
+            node.children[idx]=Node()
+        node=node.children[idx]
+    node.leaf=leaf
+
+def build_tree(leaves:List[Leaf]):
+    for l in leaves:
+        insert_leaf(l)
+
+
+def encode_node(node:Node, textures:Dict[str,int]) -> bytes:
+    if node.leaf:
+        leaf=node.leaf
+        edges=[]
+        for d in range(3):
+            start=leaf.start[d]
+            end=leaf.end[d]
+            val=(end<<4)|start
+            for x in (0,1):
+                for y in (0,1):
+                    edges.append(val)
+        solid=all(e==0x88 for e in edges)
+        typ=2 if solid else 3
+        data=bytearray()
+        data.append(typ)
+        if typ==3:
+            data.extend(bytes(edges))
+        for orient in ('x-','x+','y-','y+','z-','z+'):
+            t=leaf.textures.get(orient,'sky')
+            data.extend(struct.pack('<H', textures.get(t,0)))
+        return bytes(data)
+    if not node.children:
+        # empty cube
+        return struct.pack('<B6H',1,*([0]*6))
+    out=b'\x00'
+    for i in range(8):
+        child=node.children.get(i)
+        if child is None:
+            out+=struct.pack('<B6H',1,*([0]*6))
         else:
-            half=1<<(depth-1)
-            data=b'\x00'
-            for i in range(8):
-                dx=i&1; dy=(i>>1)&1; dz=(i>>2)&1
-                data+=encode(depth-1,x0+dx*half,y0+dy*half,z0+dz*half)
-            return data
-    depth=5
-    return encode(depth,0,0,0)
+            out+=encode_node(child,textures)
+    return out
 
-
-def write_mpz(filename, grid, textures, spawn_pos):
+def write_mpz(filename, rootnode:Node, textures:Dict[str,int], spawn_pos):
     texslots=len(textures)
     header=struct.pack('<4sii7i4s', b'MAPZ', MAP_VERSION, 44, WORLD_SIZE,
                         1,0,0,texslots, GAME_VERSION, MAP_REVISION, GAME_ID)
@@ -240,11 +253,10 @@ def write_mpz(filename, grid, textures, spawn_pos):
     texmru=struct.pack('<H',texslots)+b''.join(struct.pack('<H',i) for i in range(texslots))
     ent=struct.pack('<3fB3B', *spawn_pos, 3,0,0,0)+struct.pack('<i7i',7,*([0]*7))+struct.pack('<i',0)
     vslots=b''.join(struct.pack('<ii',0,-1) for _ in range(texslots))
-    octree=encode_octree(grid,textures)
+    octree=encode_node(rootnode, textures)
     data=header+variables+texmru+ent+vslots+octree
     with gzip.open(filename,'wb') as f:
         f.write(data)
-
 
 def write_cfg(filename, textures):
     with open(filename,'w') as f:
@@ -257,26 +269,22 @@ def write_cfg(filename, textures):
             f.write(f'texture 0 textures/{name}.png\n')
 
 def main():
-    brushes = parse_valve_map('valve220_room.map')
-    xmin, xmax, ymin, ymax, zmin, zmax = collect_bounds(brushes)
-    # keep walls aligned to the 16 unit grid
-    def snap(v: float) -> float:
-        return round(v / VOXEL_SIZE) * VOXEL_SIZE
-    offset = (
-        snap(WORLD_SIZE / 2 - (xmin + xmax) / 2),
-        snap(WORLD_SIZE / 2 - (ymin + ymax) / 2),
-        VOXEL_SIZE * 2 - zmin,  # align floor to base layer
+    brushes=parse_valve_map('valve220_room.map')
+    xmin,xmax,ymin,ymax,zmin,zmax=collect_bounds(brushes)
+    def snap(v:float)->float:
+        return round(v/16)*16
+    offset=(
+        snap(WORLD_SIZE/2-(xmin+xmax)/2),
+        snap(WORLD_SIZE/2-(ymin+ymax)/2),
+        16 - zmin
     )
-    grid = build_grid(brushes, offset)
-    textures = gather_textures(grid)
-    start_origin, _ = parse_player_start('valve220_room.map')
-    spawn = (
-        start_origin[0] + offset[0],
-        start_origin[1] + offset[1],
-        start_origin[2] + offset[2],
-    )
-    write_mpz('valve220_room.mpz',grid,textures,spawn)
-    write_cfg('valve220_room.cfg',textures)
+    leaves=brushes_to_leaves(brushes, offset)
+    textures=gather_textures(leaves)
+    build_tree(leaves)
+    start_origin,_=parse_player_start('valve220_room.map')
+    spawn=(start_origin[0]+offset[0], start_origin[1]+offset[1], start_origin[2]+offset[2])
+    write_mpz('valve220_room.mpz', root, textures, spawn)
+    write_cfg('valve220_room.cfg', textures)
 
 if __name__=='__main__':
     main()

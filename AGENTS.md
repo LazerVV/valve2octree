@@ -2,11 +2,11 @@ I want to reverse-engineer the Cube 2: Sauerbraten map format, to write a conver
 
 The file `test.py` is still included as a minimal example to generate a toy map.
 `convert_map.py` reads `valve220_room.map` and writes a Red&nbsp;Eclipse
-compatible `.mpz` map. Each brush becomes a hollow box built from
-voxels on its surface only. Textures are mapped to the box sides by
-examining the original brush planes. The converter keeps the player
-start position and aligns the level so the lowest brushes sit on a
-solid base layer.
+compatible `.mpz` map. Each brush is stored as one Cube&nbsp;2
+"cube" whose edges are set to the brush bounds instead of spawning
+many tiny voxels. Textures are mapped to the matching faces and the
+player start stays where it belongs. The whole map is aligned so the
+lowest brushes rest on a small solid base.
 
 `voxel_fill.py` was removed in favour of this simpler box-based approach.
 
