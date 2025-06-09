@@ -30,10 +30,11 @@ pattern = re.compile(r"\(\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-
 class Brush:
     def __init__(self):
         self.planes = []  # list of (points, texture)
-        self.bounds = [None, None, None, None, None, None]  # xmin,xmax,ymin,ymax,zmin,zmax
-        self.textures: Dict[str,str] = {}
+        self.bounds = [None, None, None, None, None, None]
+        self.textures: Dict[str, str] = {}
 
     def add_plane(self, pts, texture):
+        """Store plane points and map its predominant normal to a cube side."""
         self.planes.append((pts, texture))
         xs, ys, zs = zip(*pts)
         if self.bounds[0] is None:
@@ -46,25 +47,23 @@ class Brush:
             self.bounds[4] = min(self.bounds[4], min(zs))
             self.bounds[5] = max(self.bounds[5], max(zs))
 
+        # compute plane normal to determine orientation
+        v1 = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2])
+        v2 = (pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2])
+        nx = v1[1] * v2[2] - v1[2] * v2[1]
+        ny = v1[2] * v2[0] - v1[0] * v2[2]
+        nz = v1[0] * v2[1] - v1[1] * v2[0]
+        ax, ay, az = abs(nx), abs(ny), abs(nz)
+        if ax >= ay and ax >= az:
+            orient = 'x+' if nx > 0 else 'x-'
+        elif ay >= ax and ay >= az:
+            orient = 'y+' if ny > 0 else 'y-'
+        else:
+            orient = 'z+' if nz > 0 else 'z-'
+        self.textures[orient] = texture
+
     def finalize(self):
-        xmin,xmax,ymin,ymax,zmin,zmax = self.bounds
-        for pts, tex in self.planes:
-            xs,ys,zs = zip(*pts)
-            if all(x==xs[0] for x in xs):
-                if xs[0]==xmin:
-                    self.textures['x-']=tex
-                elif xs[0]==xmax:
-                    self.textures['x+']=tex
-            elif all(y==ys[0] for y in ys):
-                if ys[0]==ymin:
-                    self.textures['y-']=tex
-                elif ys[0]==ymax:
-                    self.textures['y+']=tex
-            elif all(z==zs[0] for z in zs):
-                if zs[0]==zmin:
-                    self.textures['z-']=tex
-                elif zs[0]==zmax:
-                    self.textures['z+']=tex
+        pass
 
 
 def parse_valve_map(fname: str) -> List[Brush]:
@@ -96,6 +95,27 @@ def parse_valve_map(fname: str) -> List[Brush]:
                     texture = m.group(10)
                     cur.add_plane(pts, texture)
     return brushes
+
+
+def parse_player_start(fname: str):
+    origin = (0.0, 0.0, 0.0)
+    angle = 0.0
+    with open(fname) as f:
+        capture = False
+        for line in f:
+            s = line.strip()
+            if s.startswith('// entity 1'):
+                capture = True
+                continue
+            if capture:
+                if s.startswith('//'):
+                    break
+                if s.startswith('"origin"'):
+                    parts = s.split('"')[3].split()
+                    origin = tuple(float(p) for p in parts)
+                elif s.startswith('"angle"'):
+                    angle = float(s.split('"')[3])
+        return origin, angle
 
 
 def collect_bounds(brushes: List[Brush]):
@@ -234,17 +254,24 @@ def write_cfg(filename, textures):
             f.write(f'texture 0 textures/{name}.png\n')
 
 def main():
-    brushes=parse_valve_map('valve220_room.map')
-    xmin,xmax,ymin,ymax,zmin,zmax=collect_bounds(brushes)
-    # Align the level so that voxel boundaries match the original brush layout
-    def snap(v):
+    brushes = parse_valve_map('valve220_room.map')
+    xmin, xmax, ymin, ymax, zmin, zmax = collect_bounds(brushes)
+    # keep walls aligned to the 16 unit grid
+    def snap(v: float) -> float:
         return round(v / VOXEL_SIZE) * VOXEL_SIZE
-    offset=(snap(WORLD_SIZE/2 - (xmin+xmax)/2),
-            snap(WORLD_SIZE/2 - (ymin+ymax)/2),
-            snap(WORLD_SIZE/2 - (zmin+zmax)/2))
-    grid=build_grid(brushes,offset)
-    textures=gather_textures(grid)
-    spawn=(144+offset[0], -144+offset[1], 16+offset[2])
+    offset = (
+        snap(WORLD_SIZE / 2 - (xmin + xmax) / 2),
+        snap(WORLD_SIZE / 2 - (ymin + ymax) / 2),
+        snap(WORLD_SIZE / 2 - (zmin + zmax) / 2),
+    )
+    grid = build_grid(brushes, offset)
+    textures = gather_textures(grid)
+    start_origin, _ = parse_player_start('valve220_room.map')
+    spawn = (
+        start_origin[0] + offset[0],
+        start_origin[1] + offset[1],
+        start_origin[2] + offset[2],
+    )
     write_mpz('valve220_room.mpz',grid,textures,spawn)
     write_cfg('valve220_room.cfg',textures)
 
