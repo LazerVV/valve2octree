@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.11)
 
-# link_deps([FATAL] DEPS <deps>..)
+# link_deps([FATAL] DEPS <deps>...)
 # Calls link_directories for <deps>. <deps> is a list of dependencies.
 # If FATAL is specified then it exits on failure. Otherwise it returns
 # and sets link_deps_failed.
@@ -62,7 +62,7 @@ endif()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 # set compile options
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fsigned-char -ffast-math -fno-exceptions -fno-rtti -Wno-invalid-offsetof -std=c++11")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fsigned-char -ffast-math -fno-exceptions -fno-rtti -Wno-invalid-offsetof")
 
 # Use pkg-config to configure dependencies later
 find_package(PkgConfig REQUIRED)
@@ -70,7 +70,7 @@ find_package(PkgConfig REQUIRED)
 set(client_deps zlib sdl2 SDL2_image SDL2_mixer gl)
 set(server_deps zlib)
 set(genkey_deps zlib)
-set(tessfont_deps zlib freetype2)
+set(cube2font_deps zlib freetype2)
 
 set(BUILD_CLIENT true CACHE BOOL "Build client?")
 if(NOT ${BUILD_CLIENT})
@@ -93,6 +93,7 @@ file(GLOB client_sources
     game/*.cpp
     shared/*.cpp
     support/jsmn.c
+    support/sqlite3.c
 )
 
 # the server requires less source files
@@ -103,6 +104,7 @@ file(GLOB server_sources
     shared/tools.cpp
     shared/zip.cpp
     support/jsmn.c
+    support/sqlite3.c
     engine/cdpi.cpp
     engine/command.cpp
     engine/http.cpp
@@ -123,20 +125,26 @@ file(GLOB genkey_cpp_path shared/genkey.cpp)
 list(REMOVE_ITEM client_sources ${genkey_cpp_path})
 list(REMOVE_ITEM server_sources ${genkey_cpp_path})
 
-# tessfont is a very simple application
-file(GLOB tessfont_sources
-    shared/tessfont.cpp
+# cube2font is a very simple application
+file(GLOB cube2font_sources
+    shared/cube2font.cpp
 )
 
-# neither server nor client need tessfont.cpp - to avoid warnings about duplicate main()s, it has to be removed from their source lists
-file(GLOB tessfont_cpp_path shared/tessfont.cpp)
-list(REMOVE_ITEM client_sources ${tessfont_cpp_path})
-list(REMOVE_ITEM server_sources ${tessfont_cpp_path})
+# neither server nor client need cube2font.cpp - to avoid warnings about duplicate main()s, it has to be removed from their source lists
+file(GLOB cube2font_cpp_path shared/cube2font.cpp)
+list(REMOVE_ITEM client_sources ${cube2font_cpp_path})
+list(REMOVE_ITEM server_sources ${cube2font_cpp_path})
+
+# make sure sqlite3 is built with the correct flags
+file(GLOB sqlite3_cpp_path support/sqlite3.c)
+set_source_files_properties(support/sqlite3.c PROPERTIES
+    COMPILE_FLAGS "-DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION"
+)
 
 # platform specific code
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     list(APPEND client_deps x11)
-    set(link_libs rt openal sndfile)
+    set(link_libs rt)
     if(${WANT_STEAM})
         add_library(steam_lib SHARED IMPORTED)
         if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "i[3-6]86")
@@ -155,9 +163,20 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     endif()
     link_libraries(${link_libs})
     set(BIN_SUFFIX "_linux")
+elseif(APPLE)
+    # build OS X specific Objective-C code
+    file(GLOB mac_client_sources
+        xcode/main.m xcode/macutils.mm
+        xcode/SDLmain.m xcode/ConsoleView.m
+    )
+    file(GLOB mac_server_sources
+        xcode/macutils.mm
+    )
+    list(APPEND client_sources ${mac_client_sources})
+    list(APPEND server_sources ${mac_server_sources})
+    set(BIN_SUFFIX "_osx")
 elseif(MINGW)
-    set(link_libs ws2_32 winmm OpenAL32 sndfile)
-    link_libraries(${link_libs})
+    link_libraries(ws2_32 winmm)
     set(BIN_SUFFIX "_windows")
 else()
     set(BIN_SUFFIX "_native")
@@ -184,6 +203,25 @@ set_target_properties(redeclipse_server${BIN_SUFFIX} PROPERTIES
     COMPILE_FLAGS "-DSTANDALONE"
 )
 
+if(APPLE)
+    # include framework required in xcode/ code
+    find_library(COCOA_LIBRARY Cocoa)
+    if(${BUILD_CLIENT})
+        target_link_libraries(redeclipse${BIN_SUFFIX} ${COCOA_LIBRARY})
+    endif()
+    target_link_libraries(redeclipse_server${BIN_SUFFIX} ${COCOA_LIBRARY})
+else(APPLE)
+    # add the genkey executable
+    add_executable(genkey${BIN_SUFFIX} ${genkey_sources})
+    set_target_properties(genkey${BIN_SUFFIX} PROPERTIES
+        COMPILE_FLAGS "-DSTANDALONE"
+    )
+    add_executable(cube2font${BIN_SUFFIX} ${cube2font_sources})
+    set_target_properties(cube2font${BIN_SUFFIX} PROPERTIES
+        COMPILE_FLAGS "-DSTANDALONE"
+    )
+endif(APPLE)
+
 # configure dependencies
 if(${BUILD_CLIENT})
     configure_deps(TARGET redeclipse${BIN_SUFFIX} DEPS ${client_deps})
@@ -193,7 +231,7 @@ if(${BUILD_CLIENT})
 endif()
 configure_deps(TARGET redeclipse_server${BIN_SUFFIX} FATAL DEPS ${server_deps})
 configure_deps(TARGET genkey${BIN_SUFFIX} FATAL DEPS ${genkey_deps})
-configure_deps(TARGET tessfont${BIN_SUFFIX} FATAL DEPS ${tessfont_deps})
+configure_deps(TARGET cube2font${BIN_SUFFIX} FATAL DEPS ${cube2font_deps})
 
 # configure enet
 set(ENET_SOURCE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/enet)
@@ -233,7 +271,7 @@ else()
     set(ARCHITECTURE "native")
 endif()
 
-set(targets redeclipse_server${BIN_SUFFIX} genkey${BIN_SUFFIX} tessfont${BIN_SUFFIX})
+set(targets redeclipse_server${BIN_SUFFIX} genkey${BIN_SUFFIX} cube2font${BIN_SUFFIX})
 if(${BUILD_CLIENT})
     set(targets redeclipse${BIN_SUFFIX} ${targets})
 endif()

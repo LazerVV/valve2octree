@@ -248,7 +248,7 @@ struct iqm : skelloader<iqm>
                 }
                 if(!m->numtris || !m->numverts)
                 {
-                    conoutf(colourred, "Empty mesh in %s", filename);
+                    conoutf("Empty mesh in %s", filename);
                     meshes.removeobj(m);
                     delete m;
                     continue;

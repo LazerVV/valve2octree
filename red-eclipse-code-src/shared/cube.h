@@ -1,11 +1,7 @@
-#ifndef CPP_CUBE_HEADER
-#define CPP_CUBE_HEADER
+#ifndef __CUBE_H__
+#define __CUBE_H__
 
 #define _FILE_OFFSET_BITS 64
-
-#if !defined(WIN32) && defined(_WIN32)
-#define WIN32
-#endif
 
 #ifdef WIN32
 #define _USE_MATH_DEFINES
@@ -15,14 +11,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <limits.h>
 #include <float.h>
 #include <assert.h>
 #include <time.h>
-#include <sys/stat.h>
 
 #ifdef WIN32
   #define WIN32_LEAN_AND_MEAN
@@ -44,8 +38,16 @@
 #endif
 
 #ifndef STANDALONE
-  #include <SDL.h>
-  #include <SDL_opengl.h>
+  #ifdef __APPLE__
+    #include "SDL.h"
+    #define GL_GLEXT_LEGACY
+    #define __glext_h_
+    #include <OpenGL/gl.h>
+    #define main SDL_main
+  #else
+    #include <SDL.h>
+    #include <SDL_opengl.h>
+  #endif
 #endif
 
 #include <enet/enet.h>
@@ -54,18 +56,13 @@
 
 #include "tools.h"
 #include "command.h"
-#include "enum.h"
 #include "geom.h"
-#include "prop.h"
 #include "ents.h"
 #include "wind.h"
-#include "fx.h"
 
 #ifndef STANDALONE
 #include "glexts.h"
 #include "glemu.h"
-#else
-typedef enet_uint32 Uint32;
 #endif
 
 #include "iengine.h"

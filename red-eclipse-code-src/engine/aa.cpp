@@ -37,7 +37,7 @@ void setuptqaa(int w, int h)
         if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
             fatal("Failed allocating TQAA buffer!");
     }
-    glBindFramebuffer_(GL_FRAMEBUFFER, renderfbo);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
 
     tqaaprevscreenmatrix.identity();
 
@@ -77,7 +77,7 @@ VAR(0, debugtqaa, 0, 0, 2);
 void viewtqaa()
 {
     int w = min(hudw, hudh)*1.0f, h = (w*hudh)/hudw, tw = gw, th = gh;
-    SETSHADER(hudrectrgb);
+    SETSHADER(hudrect);
     gle::colorf(1, 1, 1);
     switch(debugtqaa)
     {
@@ -155,7 +155,7 @@ void setupfxaa(int w, int h)
     bindgdepth();
     if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         fatal("Failed allocating FXAA buffer!");
-    glBindFramebuffer_(GL_FRAMEBUFFER, renderfbo);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
 
     loadfxaashaders();
 }
@@ -538,7 +538,7 @@ void setupsmaa(int w, int h)
         if(glCheckFramebufferStatus_(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
             fatal("Failed allocating SMAA buffer!");
     }
-    glBindFramebuffer_(GL_FRAMEBUFFER, renderfbo);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
 
     loadsmaashaders(split);
 }
@@ -567,7 +567,7 @@ VAR(0, debugsmaa, 0, 0, 5);
 void viewsmaa()
 {
     int w = min(hudw, hudh)*1.0f, h = (w*hudh)/hudw, tw = gw, th = gh;
-    SETSHADER(hudrectrgb);
+    SETSHADER(hudrect);
     gle::colorf(1, 1, 1);
     switch(debugsmaa)
     {

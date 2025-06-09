@@ -7,3 +7,5 @@ It tries to create a simple map with a single cube or something to demonstrate t
 Try to use the files in the red-eclipse-code-src/ directory to understand how to make it work.
 
 If necessary also check out hexdump.txt of empty-ish example map (it dumps the file "empty" as in repo) and severely_outdated_documentation.txt .
+
+The correct map version is 45, don't use something else.

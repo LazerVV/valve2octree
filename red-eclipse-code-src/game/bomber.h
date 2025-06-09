@@ -13,7 +13,7 @@ struct bomberstate
     struct flag
     {
         vec droploc, droppos, inertia, spawnloc;
-        int ent, team, yaw, pitch, droptime, taketime, target;
+        int team, yaw, pitch, droptime, taketime, target;
         bool enabled;
         float distance;
 #ifdef CPP_GAME_SERVER
@@ -25,14 +25,9 @@ struct bomberstate
         int displaytime, movetime, inittime, viewtime, rendertime, interptime;
         vec viewpos, renderpos, interppos, render;
         modelstate mdl, basemdl;
-        fx::emitter *effect;
 #endif
 
-#ifdef CPP_GAME_SERVER
         flag() { reset(); }
-#else
-        flag() : effect(NULL) { reset(); }
-#endif
 
         void reset()
         {
@@ -46,9 +41,7 @@ struct bomberstate
             proj = NULL;
             displaytime = movetime = inittime = viewtime = rendertime = interptime = 0;
             viewpos = renderpos = vec(-1, -1, -1);
-            if(effect) fx::stopfx(effect);
 #endif
-            ent = -1;
             team = T_NEUTRAL;
             yaw = pitch = taketime = droptime = 0;
             target = -1;
@@ -57,13 +50,13 @@ struct bomberstate
         }
 
 #ifndef CPP_GAME_SERVER
-        vec &position(bool rend = false)
+        vec &position(bool render = false)
         {
             if(team == T_NEUTRAL)
             {
                 if(owner)
                 {
-                    if(rend)
+                    if(render)
                     {
                         if(totalmillis != rendertime)
                         {
@@ -81,7 +74,7 @@ struct bomberstate
             return spawnloc;
         }
 
-        vec &pos(bool view = false, bool rend = false)
+        vec &pos(bool view = false, bool render = false)
         {
             if(team == T_NEUTRAL && view)
             {
@@ -90,13 +83,13 @@ struct bomberstate
                     if(totalmillis != viewtime)
                     {
                         float amt = (lastmillis-interptime)/500.f;
-                        viewpos = vec(interppos).add(vec(position(rend)).sub(interppos).mul(amt));
+                        viewpos = vec(interppos).add(vec(position(render)).sub(interppos).mul(amt));
                         viewtime = totalmillis;
                     }
                     return viewpos;
                 }
             }
-            return position(rend);
+            return position(render);
         }
 
         void setposition(const vec &pos)
@@ -128,11 +121,10 @@ struct bomberstate
         flags.shrink(0);
     }
 
-    void addaffinity(int n, const vec &o, int team, int yaw, int pitch)
+    void addaffinity(const vec &o, int team, int yaw, int pitch)
     {
         flag &f = flags.add();
         f.reset();
-        f.ent = n;
         f.team = team;
         f.yaw = yaw;
         f.pitch = pitch;
@@ -147,7 +139,7 @@ struct bomberstate
     void interp(int i, int t)
     {
         flag &f = flags[i];
-        f.displaytime = f.displaytime ? t - max(1000 - (t - f.displaytime), 0) : t;
+        f.displaytime = f.displaytime ? t-max(1000-(t-f.displaytime), 0) : t;
         f.interptime = t;
         f.interppos = f.position(true);
     }
@@ -155,7 +147,7 @@ struct bomberstate
     void destroy(int id)
     {
         flags[id].proj = NULL;
-        loopv(projs::projs) if(projs::projs[i]->projtype == PROJ_AFFINITY && projs::projs[i]->id == id)
+        loopv(projs::projs) if(projs::projs[i]->projtype == PRJ_AFFINITY && projs::projs[i]->id == id)
         {
             projs::projs[i]->state = CS_DEAD;
             projs::projs[i]->beenused = 2;
@@ -165,7 +157,7 @@ struct bomberstate
     void create(int id, int target)
     {
         flag &f = flags[id];
-        f.proj = projs::create(f.droploc, f.inertia, false, NULL, PROJ_AFFINITY, -1, 0, bomberresetdelay, bomberresetdelay, 1, 1, id, -1, -1, 0, 1, false, game::getclient(target));
+        f.proj = projs::create(f.droploc, f.inertia, false, NULL, PRJ_AFFINITY, -1, 0, bomberresetdelay, bomberresetdelay, 1, 1, id, -1, -1, 0, 1, false, game::getclient(target));
     }
 #endif
 
@@ -189,6 +181,7 @@ struct bomberstate
 #else
         f.movetime = 0;
         if(!f.inittime) f.inittime = t;
+        owner->addicon(eventicon::AFFINITY, t, game::eventiconfade, f.team);
         f.lastowner = owner;
         destroy(i);
 #endif
@@ -242,8 +235,7 @@ struct bomberstate
 namespace bomber
 {
     extern bomberstate st;
-    extern bool haloallow(const vec &o, int id, int render = 0, bool justtest = false);
-    extern int hasaffinity(gameent *d);
+    extern int carryaffinity(gameent *d);
     extern bool dropaffinity(gameent *d);
     extern void sendaffinity(packetbuf &p);
     extern void parseaffinity(ucharbuf &p);
@@ -256,6 +248,9 @@ namespace bomber
     extern void setscore(int team, int total);
     extern void update();
     extern void killed(gameent *d, gameent *v);
+    extern void drawnotices(int w, int h, int &tx, int &ty, int tr, int tg, int tb, float blend);
+    extern void drawevents(int w, int h, int &tx, int &ty, int tr, int tg, int tb, float blend);
+    extern void drawonscreen(int w, int h, float blend);
     extern void preload();
     extern void render();
     extern void adddynlights();
@@ -266,8 +261,8 @@ namespace bomber
     extern bool aipursue(gameent *d, ai::aistate &b);
     extern bool aicheckpos(gameent *d, ai::aistate &b);
     extern void removeplayer(gameent *d);
+    extern vec pulsecolour();
     extern void checkcams(vector<cament *> &cameras);
     extern void updatecam(cament *c);
-    extern void checkui();
 }
 #endif

@@ -1,82 +1,62 @@
-// console.cpp: the console buffer, its display, and control
+// console.cpp: the console buffer, its display, and command line control
 
 #include "engine.h"
 
 reversequeue<cline, MAXCONLINES> conlines[CON_MAX];
 
-bigstring consolebuf;
-int consolemillis = 0, consolepos = -1;
-char *consoleaction = NULL, *consoleprompt = NULL;
-bool consolerun = false;
-SVAR(0, consolestr, "");
+int commandmillis = -1;
+bigstring commandbuf;
+char *commandaction = NULL, *commandprompt = NULL, *commandicon = NULL;
+enum { CF_COMPLETE = 1<<0, CF_EXECUTE = 1<<1, CF_MESSAGE = 1<<2 };
+int commandflags = 0, commandpos = -1, commandcolour = 0;
 
-VAR(IDF_PERSIST, consolestay, 0, 1, 1);
-VAR(IDF_PERSIST, consoleecho, 0, 1, 1);
-VAR(IDF_PERSIST, consolevars, 0, 1, 2);
-
-void conline(int color, const char *sf, int type)
+void conline(int type, const char *sf, int n)
 {
     if(type < 0 || type >= CON_MAX) type = CON_DEBUG;
     char *buf = conlines[type].length() >= MAXCONLINES ? conlines[type].remove().cref : newstring("", BIGSTRLEN-1);
     cline &cl = conlines[type].add();
     cl.cref = buf;
-    cl.color = color;
     cl.reftime = cl.outtime = totalmillis;
     cl.realtime = clocktime;
-    copystring(cl.cref, sf, BIGSTRLEN);
+
+    if(n)
+    {
+        copystring(cl.cref, "  ", BIGSTRLEN);
+        concatstring(cl.cref, sf, BIGSTRLEN);
+        loopj(2)
+        {
+            int off = n+j;
+            if(conlines[type].inrange(off))
+            {
+                if(j) concatstring(conlines[type][off].cref, "\fs", BIGSTRLEN);
+                else prependstring(conlines[type][off].cref, "\fS", BIGSTRLEN);
+            }
+        }
+    }
+    else copystring(cl.cref, sf, BIGSTRLEN);
 }
 
-#define LOOPCONLINES(type,str,name,op) \
-    ICOMMAND(0, loopcon##str##name, "iire", (int *count, int *skip, ident *id, uint *body), \
+#define LOOPCONLINES(name,op) \
+    ICOMMAND(0, loopconlines##name, "iiire", (int *type, int *count, int *skip, ident *id, uint *body), \
     { \
-        if(conlines[type].empty()) return; \
+        if(*type < 0 || *type >= CON_MAX || conlines[*type].empty()) return; \
         loopstart(id, stack); \
-        op(conlines[type], *count, *skip, \
+        op(conlines[*type], *count, *skip) \
         { \
             loopiter(id, stack, i); \
             execute(body); \
-        }); \
-        loopend(id, stack); \
-    }); \
-    ICOMMAND(0, loopcon##str##name##if, "iiree", (int *count, int *skip, ident *id, uint *cond, uint *body), \
-    { \
-        if(conlines[type].empty()) return; \
-        loopstart(id, stack); \
-        op(conlines[type], *count, *skip, \
-        { \
-            loopiter(id, stack, i); \
-            if(executebool(cond)) execute(body); \
-        }); \
-        loopend(id, stack); \
-    }); \
-    ICOMMAND(0, loopcon##str##name##while, "iiree", (int *count, int *skip, ident *id, uint *cond, uint *body), \
-    { \
-        if(conlines[type].empty()) return; \
-        loopstart(id, stack); \
-        op(conlines[type], *count, *skip, \
-        { \
-            loopiter(id, stack, i); \
-            if(!executebool(cond)) break; \
-            execute(body); \
-        }); \
+        } \
         loopend(id, stack); \
     });
 
-LOOPCONLINES(CON_DEBUG, debug,,loopcsv);
-LOOPCONLINES(CON_DEBUG, debug,rev,loopcsvrev);
-LOOPCONLINES(CON_EVENT, event,,loopcsv);
-LOOPCONLINES(CON_EVENT, event,rev,loopcsvrev);
+LOOPCONLINES(,loopcsv);
+LOOPCONLINES(rev,loopcsvrev);
 
-#define CONLINEVARS(type,str) \
-    ICOMMANDV(0, con##str##lines, conlines[type].length()); \
-    ICOMMAND(0, getcon##str##cref, "b", (int *n), result(conlines[type].inrange(*n) ? conlines[type][*n].cref : "")); \
-    ICOMMAND(0, getcon##str##colour, "b", (int *n), intret(conlines[type].inrange(*n) ? conlines[type][*n].color : colourwhite)); \
-    ICOMMAND(0, getcon##str##reftime, "b", (int *n), intret(conlines[type].inrange(*n) ? conlines[type][*n].reftime : 0)); \
-    ICOMMAND(0, getcon##str##outtime, "b", (int *n), intret(conlines[type].inrange(*n) ? conlines[type][*n].outtime : 0)); \
-    ICOMMAND(0, getcon##str##realtime, "b", (int *n), intret(conlines[type].inrange(*n) ? conlines[type][*n].realtime : 0));
-
-CONLINEVARS(CON_DEBUG, debug);
-CONLINEVARS(CON_EVENT, event);
+ICOMMAND(0, getconlines, "i", (int *type), intret(*type >= 0 && *type < CON_MAX ? conlines[*type].length() : 0));
+ICOMMAND(0, getconlinecref, "ib", (int *type, int *n), result(*type >= 0 && *type < CON_MAX && conlines[*type].inrange(*n) ? conlines[*type][*n].cref : ""));
+ICOMMAND(0, getconlinereftime, "ib", (int *type, int *n), intret(*type >= 0 && *type < CON_MAX && conlines[*type].inrange(*n) ? conlines[*type][*n].reftime : 0));
+ICOMMAND(0, getconlineouttime, "ib", (int *type, int *n), intret(*type >= 0 && *type < CON_MAX && conlines[*type].inrange(*n) ? conlines[*type][*n].outtime : 0));
+ICOMMAND(0, getconlinerealtime, "ib", (int *type, int *n), intret(*type >= 0 && *type < CON_MAX && conlines[*type].inrange(*n) ? conlines[*type][*n].realtime : 0));
 
 // keymap is defined externally in keymap.cfg
 struct keym
@@ -85,94 +65,28 @@ struct keym
     {
         ACTION_DEFAULT = 0,
         ACTION_SPECTATOR,
+        ACTION_EDITING,
         ACTION_WAITING,
-        NUM_GAME_ACTIONS,
-
-        ACTION_EDITING = NUM_GAME_ACTIONS,
-        NUM_ACTIONS
-    };
-
-    enum
-    {
-        ACTION_MOD_CTRL = 0,
-        ACTION_MOD_ALT,
-        ACTION_MOD_SHIFT,
-
-        ACTION_MODS,
-
-        NUM_EDIT_ACTIONS = ACTION_MODS * ACTION_MODS
+        NUMACTIONS
     };
 
     int code;
     char *name;
-    char *gameactions[NUM_GAME_ACTIONS];
-    char *editactions[NUM_EDIT_ACTIONS];
-    bool pressed, gamepersist[NUM_GAME_ACTIONS], editpersist[NUM_EDIT_ACTIONS];
+    char *actions[NUMACTIONS];
+    bool pressed, persist[NUMACTIONS];
 
-    keym() : code(-1), name(NULL), pressed(false)
-    {
-        loopi(NUM_GAME_ACTIONS)
-        {
-            gameactions[i] = newstring("");
-            gamepersist[i] = false;
-        }
-
-        loopi(NUM_EDIT_ACTIONS)
-        {
-            editactions[i] = newstring("");
-            editpersist[i] = false;
-        }
-    }
-    ~keym()
-    {
-        DELETEA(name);
-        loopi(NUM_GAME_ACTIONS)
-        {
-            DELETEA(gameactions[i]);
-            gamepersist[i] = false;
-        }
-
-        loopi(NUM_EDIT_ACTIONS)
-        {
-            DELETEA(editactions[i]);
-            editpersist[i] = false;
-        }
-    }
-
-    bool &getpersist(int type, int modifiers = 0)
-    {
-        if(type == ACTION_EDITING) return editpersist[modifiers];
-        else return gamepersist[type];
-    }
-
-    char *&getbinding(int type, int modifiers = 0)
-    {
-        if(type == ACTION_EDITING) return editactions[modifiers];
-        else return gameactions[type];
-    }
-
-    char *&getbestbinding(int type, int modifiers = 0, bool force = false)
-    {
-        char **act = &getbinding(type, modifiers);
-
-        if((!*act || !**act) && !force)
-        {
-            act = &getbinding(type);
-            if(!*act || !**act) act = &getbinding(ACTION_DEFAULT);
-        }
-
-        return *act;
-    }
+    keym() : code(-1), name(NULL), pressed(false) { loopi(NUMACTIONS) { actions[i] = newstring(""); persist[i] = false; } }
+    ~keym() { DELETEA(name); loopi(NUMACTIONS) { DELETEA(actions[i]); persist[i] = false; } }
 
     void clear(int type);
-    void clear() { loopi(NUM_ACTIONS) clear(i); }
+    void clear() { loopi(NUMACTIONS) clear(i); }
 };
 
 hashtable<int, keym> keyms(128);
 
 void keymap(int *code, char *key)
 {
-    if(identflags&IDF_MAP) { conoutf(colourred, "Cannot override keymap"); return; }
+    if(identflags&IDF_WORLD) { conoutf("\frCannot override keymap"); return; }
     keym &km = keyms[*code];
     km.code = *code;
     DELETEA(km.name);
@@ -190,14 +104,13 @@ const char *getkeyname(int code)
     return km ? km->name : NULL;
 }
 
-void searchbindlist(const char *action, int type, int modifiers, int limit, const char *s1, const char *s2, const char *sep1, const char *sep2, vector<char> &names, bool force)
+void searchbindlist(const char *action, int type, int limit, const char *s1, const char *s2, const char *sep1, const char *sep2, vector<char> &names, bool force)
 {
     const char *name1 = NULL, *name2 = NULL, *lastname = NULL;
     int found = 0;
     enumerate(keyms, keym, km,
     {
-        char *act = km.getbestbinding(type, modifiers, force);
-
+        char *act = type && force && (!km.actions[type] || !*km.actions[type]) ? km.actions[keym::ACTION_DEFAULT] : km.actions[type];
         if(act && !strcmp(act, action))
         {
             if(!name1) name1 = km.name;
@@ -255,11 +168,11 @@ void searchbindlist(const char *action, int type, int modifiers, int limit, cons
     names.add('\0');
 }
 
-const char *searchbind(const char *action, int type, int modifiers)
+const char *searchbind(const char *action, int type)
 {
     enumerate(keyms, keym, km,
     {
-        char *act = km.getbestbinding(type, modifiers);
+        char *act = ((!km.actions[type] || !*km.actions[type]) && type ? km.actions[keym::ACTION_DEFAULT] : km.actions[type]);
         if(!strcmp(act, action)) return km.name;
     });
     return NULL;
@@ -346,47 +259,47 @@ keym *findbind(char *key)
     return NULL;
 }
 
-void getbind(char *key, int type, int modifiers = 0)
+void getbind(char *key, int type)
 {
     keym *km = findbind(key);
-    result(km ? (km->getbestbinding(type, modifiers, true)) : "");
+    result(km ? ((!km->actions[type] || !*km->actions[type]) && type ? km->actions[keym::ACTION_DEFAULT] : km->actions[type]) : "");
 }
 
 int changedkeys = 0;
 
-void bindkey(char *key, char *action, int state, const char *cmd, int modifiers = 0)
+void bindkey(char *key, char *action, int state, const char *cmd)
 {
-    if(identflags&IDF_MAP) { conoutf(colourred, "Cannot override %s \"%s\"", cmd, key); return; }
+    if(identflags&IDF_WORLD) { conoutf("\frCannot override %s \"%s\"", cmd, key); return; }
     keym *km = findbind(key);
-    if(!km) { conoutf(colourred, "Unknown key \"%s\"", key); return; }
-    char *&binding = km->getbinding(state, modifiers);
-    bool &persist = km->getpersist(state, modifiers);
+    if(!km) { conoutf("\frUnknown key \"%s\"", key); return; }
+    char *&binding = km->actions[state];
+    bool *persist = &km->persist[state];
     if(!keypressed || keyaction!=binding) delete[] binding;
     // trim white-space to make searchbinds more reliable
     while(iscubespace(*action)) action++;
     int len = strlen(action);
     while(len>0 && iscubespace(action[len-1])) len--;
     binding = newstring(action, len);
-    persist = initing != INIT_DEFAULTS;
+    *persist = initing != INIT_DEFAULTS;
     changedkeys = totalmillis;
 }
 
 ICOMMAND(0, bind,     "ss", (char *key, char *action), bindkey(key, action, keym::ACTION_DEFAULT, "bind"));
 ICOMMAND(0, specbind, "ss", (char *key, char *action), bindkey(key, action, keym::ACTION_SPECTATOR, "specbind"));
-ICOMMAND(0, editbind, "ssi", (char *key, char *action, int *modifiers), bindkey(key, action, keym::ACTION_EDITING, "editbind", *modifiers));
+ICOMMAND(0, editbind, "ss", (char *key, char *action), bindkey(key, action, keym::ACTION_EDITING, "editbind"));
 ICOMMAND(0, waitbind, "ss", (char *key, char *action), bindkey(key, action, keym::ACTION_WAITING, "waitbind"));
 ICOMMAND(0, getbind,     "s", (char *key), getbind(key, keym::ACTION_DEFAULT));
 ICOMMAND(0, getspecbind, "s", (char *key), getbind(key, keym::ACTION_SPECTATOR));
-ICOMMAND(0, geteditbind, "si", (char *key, int *modifiers), getbind(key, keym::ACTION_EDITING, *modifiers));
+ICOMMAND(0, geteditbind, "s", (char *key), getbind(key, keym::ACTION_EDITING));
 ICOMMAND(0, getwaitbind, "s", (char *key), getbind(key, keym::ACTION_WAITING));
-ICOMMAND(0, searchbinds,     "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_DEFAULT, 0, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
-ICOMMAND(0, searchspecbinds, "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_SPECTATOR, 0, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
-ICOMMAND(0, searcheditbinds, "sissssbi", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force, int *modifiers), { vector<char> list; searchbindlist(action, keym::ACTION_EDITING, *modifiers, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
-ICOMMAND(0, searchwaitbinds, "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_WAITING, 0, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
+ICOMMAND(0, searchbinds,     "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_DEFAULT, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
+ICOMMAND(0, searchspecbinds, "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_SPECTATOR, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
+ICOMMAND(0, searcheditbinds, "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_EDITING, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
+ICOMMAND(0, searchwaitbinds, "sissssb", (char *action, int *limit, char *s1, char *s2, char *sep1, char *sep2, int *force), { vector<char> list; searchbindlist(action, keym::ACTION_WAITING, max(*limit, 0), s1, s2, sep1, sep2, list, *force!=0); result(list.getbuf()); });
 
 void keym::clear(int type)
 {
-    char *&binding = getbinding(type);
+    char *&binding = actions[type];
     if(binding[0])
     {
         if(!keypressed || keyaction!=binding) delete[] binding;
@@ -402,43 +315,42 @@ ICOMMAND(0, clearallbinds, "", (), enumerate(keyms, keym, km, km.clear()));
 
 ICOMMAND(0, keyspressed, "issss", (int *limit, char *s1, char *s2, char *sep1, char *sep2), { vector<char> list; getkeypressed(max(*limit, 0), s1, s2, sep1, sep2, list); result(list.getbuf()); });
 
-void closeconsole()
+void inputcommand(char *init, char *action = NULL, char *prompt = NULL, char *icon = NULL, int colour = colourwhite, char *flags = NULL) // turns input to the command line on or off
 {
-    if(consolemillis <= 0) return;
-    consolemillis = -totalmillis;
-    textinput(false, TI_CONSOLE);
-    keyrepeat(false, KR_CONSOLE);
-    copystring(consolebuf, "", BIGSTRLEN);
-    DELETEA(consoleaction);
-    DELETEA(consoleprompt);
-    consolepos = -1;
-}
-
-void inputconsole(const char *init, const char *prompt = NULL, const char *action = NULL) // turns input to the console on or off
-{
-    if(consolemillis <= 0)
+    commandmillis = init ? totalmillis : -totalmillis;
+    textinput(commandmillis >= 0, TI_CONSOLE);
+    keyrepeat(commandmillis >= 0, KR_CONSOLE);
+    copystring(commandbuf, init ? init : "", BIGSTRLEN);
+    DELETEA(commandaction);
+    DELETEA(commandprompt);
+    DELETEA(commandicon);
+    commandpos = -1;
+    if(action && action[0]) commandaction = newstring(action);
+    if(prompt && prompt[0]) commandprompt = newstring(prompt);
+    if(icon && icon[0]) commandicon = newstring(icon);
+    commandcolour = colour;
+    commandflags = 0;
+    if(flags) while(*flags) switch(*flags++)
     {
-        consolemillis = totalmillis ? totalmillis : 1;
-        textinput(true, TI_CONSOLE);
-        keyrepeat(true, KR_CONSOLE);
+        case 'c': commandflags |= CF_COMPLETE; break;
+        case 'x': commandflags |= CF_EXECUTE; break;
+        case 'm': commandflags |= CF_MESSAGE; break;
+        case 's': commandflags |= CF_COMPLETE|CF_EXECUTE|CF_MESSAGE; break;
     }
-    copystring(consolebuf, init ? init : "", BIGSTRLEN);
-    DELETEA(consoleaction);
-    DELETEA(consoleprompt);
-    consolepos = -1;
-    if(action && action[0]) consoleaction = newstring(action);
-    if(prompt && prompt[0]) consoleprompt = newstring(prompt);
-    for(int surf = 0; surf <= SURFACE_FOREGROUND && !UI::showui("console", surf); ++surf);
+    else if(init) commandflags |= CF_COMPLETE|CF_EXECUTE;
 }
 
-ICOMMAND(0, inputconsole, "sss", (char *init, char *prompt, char *action), inputconsole(init, prompt, action));
-ICOMMAND(0, closeconsole, "", (), closeconsole());
+ICOMMAND(0, saycommand, "C", (char *init), inputcommand(init));
+ICOMMAND(0, inputcommand, "ssssis", (char *init, char *action, char *prompt, char *icon, int *colour, char *flags), inputcommand(init, action, prompt, icon, *colour > 0 ? *colour : colourwhite, flags));
 
-ICOMMANDV(0, consolemillis, consolemillis);
-ICOMMANDVS(0, consolebuf, consolemillis > 0 ? consolebuf : "");
-ICOMMANDVS(0, consoleaction, consolemillis > 0 && consoleaction ? consoleaction : "");
-ICOMMANDVS(0, consoleprompt, consolemillis > 0 && consoleprompt ? consoleprompt : "");
-ICOMMANDV(0, consolepos, consolemillis > 0 ? (consolepos >= 0 ? consolepos : strlen(consolebuf)) : -1);
+ICOMMAND(0, getcommandmillis, "", (), intret(commandmillis));
+ICOMMAND(0, getcommandbuf, "", (), result(commandmillis > 0 ? commandbuf : ""));
+ICOMMAND(0, getcommandaction, "", (), result(commandmillis > 0 && commandaction ? commandaction : ""));
+ICOMMAND(0, getcommandprompt, "", (), result(commandmillis > 0 && commandprompt ? commandprompt : ""));
+ICOMMAND(0, getcommandicon, "", (), result(commandmillis > 0 && commandicon ? commandicon : ""));
+ICOMMAND(0, getcommandpos, "", (), intret(commandmillis > 0 ? (commandpos >= 0 ? commandpos : strlen(commandbuf)) : -1));
+ICOMMAND(0, getcommandflags, "", (), intret(commandmillis > 0 ? commandflags : 0));
+ICOMMAND(0, getcommandcolour, "", (), intret(commandmillis > 0 && commandcolour > 0 ? commandcolour : colourwhite));
 
 char *pastetext(char *buf, size_t len)
 {
@@ -450,7 +362,8 @@ char *pastetext(char *buf, size_t len)
     {
         size_t start = 0;
         if(buf) start = strlen(buf);
-        else { len = len ? min(len, cblen+1) : cblen+1; buf = newstring(len); }
+        else if(len) return NULL;
+        else { buf = newstring(cblen); len = cblen+1; }
         size_t decoded = decodeutf8((uchar *)&buf[start], len-1-start, (const uchar *)cb, cblen);
         buf[start + decoded] = '\0';
     }
@@ -458,63 +371,71 @@ char *pastetext(char *buf, size_t len)
     return buf;
 }
 
+SVAR(0, commandbuffer, "");
+
 struct hline
 {
-    char *buf, *action, *prompt;
+    char *buf, *action, *prompt, *icon;
+    int colour, flags;
 
-    hline() : buf(NULL), action(NULL), prompt(NULL) {}
+    hline() : buf(NULL), action(NULL), prompt(NULL), icon(NULL), colour(0), flags(0) {}
     ~hline()
     {
         DELETEA(buf);
         DELETEA(action);
         DELETEA(prompt);
+        DELETEA(icon);
     }
 
     void restore()
     {
-        copystring(consolebuf, buf);
-        if(consolepos >= (int)strlen(consolebuf)) consolepos = -1;
-        DELETEA(consoleaction);
-        DELETEA(consoleprompt);
-        if(action) consoleaction = newstring(action);
-        if(prompt) consoleprompt = newstring(prompt);
+        copystring(commandbuf, buf);
+        if(commandpos >= (int)strlen(commandbuf)) commandpos = -1;
+        DELETEA(commandaction);
+        DELETEA(commandprompt);
+        DELETEA(commandicon);
+        if(action) commandaction = newstring(action);
+        if(prompt) commandprompt = newstring(prompt);
+        if(icon) commandicon = newstring(icon);
+        commandcolour = colour;
+        commandflags = flags;
     }
 
     bool shouldsave()
     {
-        return strcmp(consolebuf, buf) || (consoleaction ? !action || strcmp(consoleaction, action) : action!=NULL) || (consoleprompt ? !prompt || strcmp(consoleprompt, prompt) : prompt!=NULL);
-    }
-
-    void create(const char *b, const char *a, const char *p)
-    {
-        buf = newstring(b);
-        if(a && *a) action = newstring(a);
-        if(p && *p) prompt = newstring(p);
+        return strcmp(commandbuf, buf) ||
+               (commandaction ? !action || strcmp(commandaction, action) : action!=NULL) ||
+               (commandprompt ? !prompt || strcmp(commandprompt, prompt) : prompt!=NULL) ||
+               (commandicon ? !icon || strcmp(commandicon, icon) : icon!=NULL) ||
+               commandcolour != colour ||
+               commandflags != flags;
     }
 
     void save()
     {
-        create(consolebuf, consoleaction, consoleprompt);
+        buf = newstring(commandbuf);
+        if(commandaction) action = newstring(commandaction);
+        if(commandprompt) prompt = newstring(commandprompt);
+        if(commandicon) icon = newstring(commandicon);
+        colour = commandcolour;
+        flags = commandflags;
     }
 
     void run()
     {
-        const char *str = action && *action ? action : buf;
-        if(str && *str == '/') str++; // workaround for old style
-        if(consoleecho) conoutf(colourwhite, "\fs\fa>\fS %s", str);
-
-        bool oldconsolerun = consolerun;
-        consolerun = true;
-        setsvar("consolestr", buf);
-        execute(str);
-        setsvar("consolestr", "");
-        consolerun = oldconsolerun;
+        if(flags&CF_EXECUTE && buf[0]=='/') execute(buf+1); // above all else
+        else if(action)
+        {
+            setsvar("commandbuffer", buf, true);
+            execute(action);
+        }
+        else client::toserver(0, buf);
     }
 };
 vector<hline *> history;
 int histpos = 0;
 
-VAR(IDF_PERSIST, maxhistory, 1, 1000, 10000);
+VAR(IDF_PERSIST, maxhistory, 0, 1000, 10000);
 
 void history_(int *n)
 {
@@ -528,37 +449,6 @@ void history_(int *n)
 }
 
 COMMANDN(0, history, history_, "i");
-
-void addhistory(char *buf, char *action, char *prompt)
-{
-    if(!buf || !*buf) return;
-    if(maxhistory && history.length() >= maxhistory)
-    {
-        loopi(history.length()-maxhistory+1) delete history[i];
-        history.remove(0, history.length()-maxhistory+1);
-    }
-    history.add(new hline)->create(buf, action, prompt);
-    histpos = history.length();
-}
-
-COMMAND(0, addhistory, "sss");
-
-void writehistory()
-{
-    stream *f = openfile("history.cfg", "w");
-    if(!f) return;
-    f->printf("// console history written automatically by Red Eclipse\n\n");
-    loopv(history)
-    {
-        hline *h = history[i];
-        if(!h->buf) continue;
-        f->printf("addhistory %s", escapestring(h->buf));
-        if(h->action || h->prompt) f->printf("%s", h->action ? escapestring(h->action) : "[]");
-        if(h->prompt) f->printf("%s", escapestring(h->prompt));
-        f->printf("\n");
-    }
-    delete f;
-}
 
 struct releaseaction
 {
@@ -600,28 +490,6 @@ void onrelease(const char *s)
 
 COMMAND(0, onrelease, "s");
 
-static inline bool iskeypressed(int code)
-{
-    keym *haskey = keyms.access(code);
-    return haskey && haskey->pressed;
-}
-
-static int getkeymodifiers()
-{
-    int modifiers = 0;
-
-    if(iskeypressed(SDLK_LCTRL) || iskeypressed(SDLK_RCTRL))
-        modifiers |= BIT(keym::ACTION_MOD_CTRL);
-
-    if(iskeypressed(SDLK_LALT) || iskeypressed(SDLK_RALT))
-        modifiers |= BIT(keym::ACTION_MOD_ALT);
-
-    if(iskeypressed(SDLK_LSHIFT) || iskeypressed(SDLK_RSHIFT))
-        modifiers |= BIT(keym::ACTION_MOD_SHIFT);
-
-    return modifiers;
-}
-
 void execbind(keym &k, bool isdown)
 {
     loopv(releaseactions)
@@ -641,18 +509,15 @@ void execbind(keym &k, bool isdown)
     if(isdown)
     {
 
-        int state = keym::ACTION_DEFAULT, modifiers = 0;
+        int state = keym::ACTION_DEFAULT;
         switch(client::state())
         {
             case CS_ALIVE: case CS_DEAD: default: break;
             case CS_SPECTATOR: state = keym::ACTION_SPECTATOR; break;
+            case CS_EDITING: state = keym::ACTION_EDITING; break;
             case CS_WAITING: state = keym::ACTION_WAITING; break;
-            case CS_EDITING:
-                state = keym::ACTION_EDITING;
-                modifiers = getkeymodifiers();
-                break;
         }
-        char *&action = k.getbestbinding(state, modifiers);
+        char *&action = k.actions[state][0] ? k.actions[state] : k.actions[keym::ACTION_DEFAULT];
         keyaction = action;
         keypressed = &k;
         execute(keyaction);
@@ -664,53 +529,33 @@ void execbind(keym &k, bool isdown)
 
 bool consoleinput(const char *str, int len)
 {
-    if(consolemillis <= 0) return false;
+    if(commandmillis < 0) return false;
 
     resetcomplete();
-    int maxlen = int(sizeof(consolebuf)), cmdlen = (int)strlen(consolebuf), cmdspace = maxlen - (cmdlen+1);
+    int maxlen = int(sizeof(commandbuf));
+    if(commandflags&CF_MESSAGE || commandbuf[0] != '/') maxlen = min(client::maxmsglen(), maxlen);
+    int cmdlen = (int)strlen(commandbuf), cmdspace = maxlen - (cmdlen+1);
     len = min(len, cmdspace);
     if(len <= 0) return true;
 
-    if(consolepos<0)
+    if(commandpos<0)
     {
-        memcpy(&consolebuf[cmdlen], str, len);
+        memcpy(&commandbuf[cmdlen], str, len);
     }
     else
     {
-        memmove(&consolebuf[consolepos+len], &consolebuf[consolepos], cmdlen - consolepos);
-        memcpy(&consolebuf[consolepos], str, len);
-        consolepos += len;
+        memmove(&commandbuf[commandpos+len], &commandbuf[commandpos], cmdlen - commandpos);
+        memcpy(&commandbuf[commandpos], str, len);
+        commandpos += len;
     }
-    consolebuf[cmdlen + len] = '\0';
+    commandbuf[cmdlen + len] = '\0';
 
     return true;
 }
 
-static char *skipword(char *s)
-{
-    while(int c = *s++) if(!iscubespace(c))
-    {
-        while(int c = *s++) if(iscubespace(c)) break;
-        break;
-    }
-    return s-1;
-}
-
-static char *skipwordrev(char *s, int n = -1)
-{
-    char *e = s + strlen(s);
-    if(n >= 0) e = min(e, &s[n]);
-    while(--e >= s) if(!iscubespace(*e))
-    {
-        while(--e >= s && !iscubespace(*e));
-        break;
-    }
-    return e+1;
-}
-
 bool consolekey(int code, bool isdown)
 {
-    if(consolemillis <= 0 || code < 0) return false;
+    if(commandmillis < 0) return false;
 
     if(isdown)
     {
@@ -721,87 +566,62 @@ bool consolekey(int code, bool isdown)
                 break;
 
             case SDLK_HOME:
-                if(consolebuf[0]) consolepos = 0;
+                if(strlen(commandbuf)) commandpos = 0;
                 break;
 
             case SDLK_END:
-                consolepos = -1;
+                commandpos = -1;
                 break;
 
             case SDLK_DELETE:
             {
-                int len = (int)strlen(consolebuf);
-                if(consolepos<0) break;
-                int end = consolepos+1;
-                if(SDL_GetModState()&SKIP_KEYS) end = skipword(&consolebuf[consolepos]) - consolebuf;
-                memmove(&consolebuf[consolepos], &consolebuf[end], len + 1 - end);
+                int len = (int)strlen(commandbuf);
+                if(commandpos<0) break;
+                memmove(&commandbuf[commandpos], &commandbuf[commandpos+1], len - commandpos);
                 resetcomplete();
-                if(consolepos>=len-1) consolepos = -1;
+                if(commandpos>=len-1) commandpos = -1;
                 break;
             }
 
             case SDLK_BACKSPACE:
             {
-                int len = (int)strlen(consolebuf), i = consolepos>=0 ? consolepos : len;
+                int len = (int)strlen(commandbuf), i = commandpos>=0 ? commandpos : len;
                 if(i<1) break;
-                int start = i-1;
-                if(SDL_GetModState()&SKIP_KEYS) start = skipwordrev(consolebuf, i) - consolebuf;
-                memmove(&consolebuf[start], &consolebuf[i], len - i + 1);
+                memmove(&commandbuf[i-1], &commandbuf[i], len - i + 1);
                 resetcomplete();
-                if(consolepos>0) consolepos = start;
-                else if(!consolepos && len<=1) consolepos = -1;
+                if(commandpos>0) commandpos--;
+                else if(!commandpos && len<=1) commandpos = -1;
                 break;
             }
 
             case SDLK_LEFT:
-                if(SDL_GetModState()&SKIP_KEYS) consolepos = skipwordrev(consolebuf, consolepos) - consolebuf;
-                else if(consolepos>0) consolepos--;
-                else if(consolepos<0) consolepos = (int)strlen(consolebuf)-1;
+                if(commandpos>0) commandpos--;
+                else if(commandpos<0) commandpos = (int)strlen(commandbuf)-1;
                 break;
 
             case SDLK_RIGHT:
-                if(consolepos>=0)
-                {
-                    if(SDL_GetModState()&SKIP_KEYS) consolepos = skipword(&consolebuf[consolepos]) - consolebuf;
-                    else ++consolepos;
-                    if(consolepos>=(int)strlen(consolebuf)) consolepos = -1;
-                }
+                if(commandpos>=0 && ++commandpos>=(int)strlen(commandbuf)) commandpos = -1;
                 break;
 
             case SDLK_UP:
                 if(histpos > history.length()) histpos = history.length();
-                if(histpos > 0)
-                {
-                    if(SDL_GetModState()&SKIP_KEYS) histpos = 0;
-                    else --histpos;
-                    history[histpos]->restore();
-                }
+                if(histpos > 0) history[--histpos]->restore();
                 break;
 
             case SDLK_DOWN:
-                if(histpos + 1 < history.length())
-                {
-                    if(SDL_GetModState()&SKIP_KEYS) histpos = history.length()-1;
-                    else ++histpos;
-                    history[histpos]->restore();
-                }
+                if(histpos + 1 < history.length()) history[++histpos]->restore();
                 break;
 
             case SDLK_TAB:
-                complete(consolebuf, SDL_GetModState()&KMOD_SHIFT);
-                if(consolepos>=0 && consolepos>=(int)strlen(consolebuf)) consolepos = -1;
+                if(commandflags&CF_COMPLETE)
+                {
+                    complete(commandbuf, commandflags&CF_EXECUTE ? "/" : NULL, SDL_GetModState()&KMOD_SHIFT);
+                    if(commandpos>=0 && commandpos>=(int)strlen(commandbuf)) commandpos = -1;
+                }
                 break;
 
             case SDLK_v:
-                if(SDL_GetModState()&MOD_KEYS)
-                {
-                    char *pastebuf = pastetext();
-                    if(pastebuf)
-                    {
-                        consoleinput(pastebuf, strlen(pastebuf));
-                        delete[] pastebuf;
-                    }
-                }
+                if(SDL_GetModState()&MOD_KEYS) pastetext(commandbuf, min(client::maxmsglen(), int(sizeof(commandbuf))));
                 break;
         }
     }
@@ -810,7 +630,7 @@ bool consolekey(int code, bool isdown)
         if(code==SDLK_RETURN || code==SDLK_KP_ENTER)
         {
             hline *h = NULL;
-            if(consolebuf[0])
+            if(commandbuf[0])
             {
                 if(history.empty() || history.last()->shouldsave())
                 {
@@ -824,16 +644,13 @@ bool consolekey(int code, bool isdown)
                 else h = history.last();
             }
             histpos = history.length();
-
-            if(consolestay) inputconsole(NULL);
-            else closeconsole();
-
+            inputcommand(NULL);
             if(h) h->run();
         }
         else if(code==SDLK_ESCAPE || code < 0)
         {
             histpos = history.length();
-            closeconsole();
+            inputcommand(NULL);
         }
     }
 
@@ -842,7 +659,7 @@ bool consolekey(int code, bool isdown)
 
 void processtextinput(const char *str, int len)
 {
-    if(!hud::textinput(str, len) && !UI::textinput(str, len))
+    if(!hud::textinput(str, len))
         consoleinput(str, len);
 }
 
@@ -868,13 +685,17 @@ void processkey(int code, bool isdown)
 {
     switch(code)
     {
+#ifdef __APPLE__
+        case SDLK_q:
+#else
         case SDLK_F4:
+#endif
             keyintercept(quit, quit());
             break;
         case SDLK_RETURN:
             keyintercept(fullscreen, setfullscreen(!(SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN)));
             break;
-#ifdef WIN32
+#if defined(WIN32) || defined(__APPLE__)
         case SDLK_TAB:
             keyintercept(iconify, SDL_MinimizeWindow(screen));
             break;
@@ -889,54 +710,31 @@ void processkey(int code, bool isdown)
     }
     keym *haskey = keyms.access(code);
     if(haskey && haskey->pressed) execbind(*haskey, isdown); // allow pressed keys to release
-    else if(!consolekey(code, isdown) && !hud::keypress(code, isdown) && !UI::keypress(code, isdown) && haskey) execbind(*haskey, isdown);
+    else if(!consolekey(code, isdown) && !hud::keypress(code, isdown) && haskey) execbind(*haskey, isdown);
 }
 
-void clear_binds()
+void clear_console()
 {
     keyms.clear();
 }
 
-ICOMMAND(0, clearconsole, "b", (int *n), if(*n < 0 || *n >= CON_MAX) { loopi(CON_MAX) conlines[i].clear(); } else { conlines[*n].clear(); });
-
-static void writebind(stream *f, keym &km, int type, int modifiers = 0)
-{
-    static const char * const cmds[4] = { "bind", "specbind", "waitbind", "editbind" };
-    char *act = km.getbinding(type, modifiers);
-
-    if(!*act)
-        f->printf("%s %s []", cmds[type], escapestring(km.name));
-    else if(validateblock(act))
-        f->printf("%s %s [%s]", cmds[type], escapestring(km.name), act);
-    else
-        f->printf("%s %s %s", cmds[type], escapestring(km.name), escapestring(act));
-
-    if(type == keym::ACTION_EDITING && modifiers) f->printf(" %d", modifiers);
-    f->printf("\n");
-}
-
 void writebinds(stream *f)
 {
+    static const char * const cmds[4] = { "bind", "specbind", "editbind", "waitbind" };
     vector<keym *> binds;
     enumerate(keyms, keym, km, binds.add(&km));
     binds.sortname();
-    loopj(keym::NUM_ACTIONS)
+    loopj(keym::NUMACTIONS)
     {
         bool found = false;
         loopv(binds)
         {
             keym &km = *binds[i];
-            if(j == keym::ACTION_EDITING) loopk(keym::NUM_EDIT_ACTIONS)
+            if(km.persist[j])
             {
-                if(km.getpersist(j, k))
-                {
-                    writebind(f, km, j, k);
-                    found = true;
-                }
-            }
-            else if (km.getpersist(j))
-            {
-                writebind(f, km, j);
+                if(!*km.actions[j]) f->printf("%s %s []\n", cmds[j], escapestring(km.name));
+                else if(validateblock(km.actions[j])) f->printf("%s %s [%s]\n", cmds[j], escapestring(km.name), km.actions[j]);
+                else f->printf("%s %s %s\n", cmds[j], escapestring(km.name), escapestring(km.actions[j]));
                 found = true;
             }
         }
@@ -969,7 +767,7 @@ struct filesval
 
     void update()
     {
-        if(type!=FILES_DIR || millis >= consolemillis) return;
+        if(type!=FILES_DIR || millis >= commandmillis) return;
         files.deletearrays();
         listfiles(dir, ext, files);
         files.sort();
@@ -1004,9 +802,9 @@ void resetcomplete()
 
 void addcomplete(char *command, int type, char *dir, char *ext)
 {
-    if(identflags&IDF_MAP)
+    if(identflags&IDF_WORLD)
     {
-        conoutf(colourred, "Cannot override complete %s", command);
+        conoutf("\frCannot override complete %s", command);
         return;
     }
     if(!dir[0])
@@ -1061,14 +859,16 @@ COMMANDN(0, complete, addfilecomplete, "sss");
 COMMANDN(0, listcomplete, addlistcomplete, "ss");
 COMMANDN(0, playercomplete, addplayercomplete, "si");
 
-void complete(char *str, bool reverse)
+void complete(char *s, const char *cmdprefix, bool reverse)
 {
-    char *start = str;
-    if(start && *start == '/') start++; // workaround for old style
-    char *s = start;
-
     if(completeescaped[0]) copystring(s, completeescaped, BIGSTRLEN);
-
+    char *start = s;
+    if(cmdprefix)
+    {
+        int cmdlen = strlen(cmdprefix);
+        if(strncmp(s, cmdprefix, cmdlen)) prependstring(s, cmdprefix, BIGSTRLEN);
+        start = &s[cmdlen];
+    }
     const char chrlist[7] = { ';', '(', ')', '[', ']', '\"', '$', };
     bool variable = false;
     loopi(7)
@@ -1148,14 +948,21 @@ void complete(char *str, bool reverse)
     }
 }
 
+#ifdef __APPLE__
+extern bool mac_capslock();
+extern bool mac_numlock();
+#endif
+
 bool capslockon = false, numlockon = false;
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__APPLE__)
 #include <X11/XKBlib.h>
 #endif
 bool capslocked()
 {
     #ifdef WIN32
     if(GetKeyState(VK_CAPITAL)) return true;
+    #elif defined(__APPLE__)
+    if(mac_capslock()) return true;
     #else
     Display *d = XOpenDisplay((char*)0);
     if(d)
@@ -1168,12 +975,14 @@ bool capslocked()
     #endif
     return false;
 }
-ICOMMANDV(0, getcapslock, capslockon ? 1 : 0);
+ICOMMAND(0, getcapslock, "", (), intret(capslockon ? 1 : 0));
 
 bool numlocked()
 {
     #ifdef WIN32
     if(GetKeyState(VK_NUMLOCK)) return true;
+    #elif defined(__APPLE__)
+    if(mac_numlock()) return true;
     #else
     Display *d = XOpenDisplay((char*)0);
     if(d)
@@ -1186,4 +995,4 @@ bool numlocked()
     #endif
     return false;
 }
-ICOMMANDV(0, getnumlock, numlockon ? 1 : 0);
+ICOMMAND(0, getnumlock, "", (), intret(numlockon ? 1 : 0));
