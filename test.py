@@ -100,11 +100,14 @@ def write_redeclipse_map(filename: str) -> None:
 
         children = []
 
-        # child 0: wall running along the Y axis (thin in X)
-        edges_wall_x = _pack_edges(0, 2, 0, 8, 0, 8)
+        # child 0: wall running along the Y axis (thin in X). By shifting the
+        # X edges to the higher end of the cube we align the wall with the
+        # boundary shared with child 1 so both walls meet neatly.
+        edges_wall_x = _pack_edges(6, 8, 0, 8, 0, 8)
         children.append(_pack_cube([TEXTURE_GROUND] * 6, edges_wall_x))
 
-        # child 1: wall running along the X axis (thin in Y)
+        # child 1: wall running along the X axis (thin in Y). Its Y edges are
+        # shifted to the lower end to touch the wall from child 0.
         edges_wall_y = _pack_edges(0, 8, 0, 2, 0, 8)
         children.append(_pack_cube([TEXTURE_GROUND] * 6, edges_wall_y))
 
