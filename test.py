@@ -32,6 +32,11 @@ def _pack_edges(sx, ex, sy, ey, sz, ez):
     return bytes(edges)
 
 
+def _pack_edge_list(pairs):
+    """Pack 12 (start, end) pairs into Cube 2 edge bytes."""
+    return bytes(((e << 4) | s) for s, e in pairs)
+
+
 def _pack_cube(tex, edges=None):
     """Pack a cube. If edges is None a solid or empty cube is written."""
     if edges is None:
@@ -47,7 +52,7 @@ def _pack_cube(tex, edges=None):
 
 
 def write_redeclipse_map(filename: str) -> None:
-    """Create a tiny Red Eclipse .mpz map with two overlapping walls."""
+    """Create a tiny Red Eclipse .mpz map with two walls and a sloped floor."""
 
     try:
         # ------------------------------------------------------------------
@@ -94,9 +99,9 @@ def write_redeclipse_map(filename: str) -> None:
 
         # --- minimal octree ------------------------------------------------
         # Instead of voxelising the world we only populate a few child cubes
-        # of the root to form two thin walls that meet in a corner. Each wall
-        # is a "normal" cube with edges adjusted so the cube becomes a flat
-        # box. All remaining children stay empty.
+        # of the root to form two thin walls and a simple sloped floor.
+        # The walls use normal cubes with shifted edges while the floor
+        # demonstrates how a slope can be encoded via individual edge values.
 
         children = []
 
@@ -111,8 +116,17 @@ def write_redeclipse_map(filename: str) -> None:
         edges_wall_y = _pack_edges(0, 8, 0, 2, 0, 8)
         children.append(_pack_cube([TEXTURE_GROUND] * 6, edges_wall_y))
 
+        # child 2: sloped floor creating a ramp. The bottom z edges on the right
+        # half are raised so the floor inclines toward X.
+        slope_edges = _pack_edge_list([
+            (0, 8), (0, 8), (0, 8), (0, 8),  # X edges
+            (0, 8), (0, 8), (0, 8), (0, 8),  # Y edges
+            (0, 8), (4, 8), (0, 8), (4, 8)   # Z edges form the slope
+        ])
+        children.append(_pack_cube([TEXTURE_GROUND] * 6, slope_edges))
+
         # remaining six children are just empty space
-        for _ in range(6):
+        for _ in range(5):
             children.append(_pack_cube([TEXTURE_SKY] * 6))
 
         octree = b"".join(children)
