@@ -1,4 +1,11 @@
-"""Generate a tiny Red Eclipse map for experimentation."""
+"""Generate a tiny Red Eclipse map for experimentation.
+
+Two shrunken cubes are placed directly as children of the root cube so
+they resemble thin wall segments. The walls partly overlap to form a
+corner and a third cube illustrates a shallow floor wedge.  This keeps
+the octree minimal while still showing how edge bytes allow non-cubic
+geometry.
+"""
 
 import struct
 import gzip
@@ -22,8 +29,55 @@ TEXTURE_GROUND = 1
 
 
 
+def _pack_edges(sx, ex, sy, ey, sz, ez):
+    """Return the 12 byte edge array for a normal cube."""
+    edges = bytearray()
+    for s, e in ((sx, ex), (sy, ey), (sz, ez)):
+        val = (e << 4) | s
+        for _ in range(4):
+            edges.append(val)
+    return bytes(edges)
+
+
+def _pack_edge_list(pairs):
+    """Pack 12 (start, end) pairs into Cube 2 edge bytes."""
+    return bytes(((e << 4) | s) for s, e in pairs)
+
+
+def _pack_cube(tex, edges=None):
+    """Pack a cube. If edges is None a solid or empty cube is written."""
+    if edges is None:
+        # 2 = solid cube, 1 = empty cube. Here we assume solid if tex != TEXTURE_SKY
+        typ = 2 if tex[0] != TEXTURE_SKY else 1
+        return struct.pack("<B6H", typ, *tex)
+
+    data = bytearray()
+    data.append(3)  # normal cube with edge data
+    data.extend(edges)
+    data.extend(struct.pack("<6H", *tex))
+    return bytes(data)
+
+
+def _empty_cube():
+    """Return an empty cube using the sky texture."""
+    return _pack_cube([TEXTURE_SKY] * 6)
+
+
+def _pack_children(children):
+    """Pack a split cube with eight child cube blobs."""
+    if len(children) != 8:
+        raise ValueError("split cube needs exactly 8 children")
+    return b"\x00" + b"".join(children)
+
+
 def write_redeclipse_map(filename: str) -> None:
-    """Create a minimal Red Eclipse .mpz map with a single player start."""
+    """Create a tiny Red Eclipse .mpz map with two overlapping walls and a ramp.
+
+    Each wall is stored directly as a child of the root cube and is made thin
+    by adjusting its edge data.  The two walls intersect in the middle of the
+    map.  Another child cube becomes a shallow wedge to demonstrate sloped
+    geometry.
+    """
 
     try:
         # ------------------------------------------------------------------
@@ -51,8 +105,8 @@ def write_redeclipse_map(filename: str) -> None:
         texmru = struct.pack("<H", 1) + struct.pack("<H", 0)
 
         # --- single entity (ET_PLAYERSTART) -------------------------------
-        # place the player roughly in the middle above the ground cubes
-        spawn_z = WORLD_SIZE / 2 + 50
+        # place the player roughly in the middle of the scene
+        spawn_z = WORLD_SIZE / 2
         entbase = struct.pack(
             "<3fB3B",
             WORLD_SIZE / 2,     # x
@@ -69,21 +123,33 @@ def write_redeclipse_map(filename: str) -> None:
         vslot = struct.pack("<ii", 0, -1)
 
         # --- minimal octree ------------------------------------------------
-        # Create the root cube with eight children. The lower four octants are
-        # solid ground blocks using the ground texture. The upper four are
-        # empty "air" using the sky texture.
-        octree = b"".join(
-            struct.pack(
-                "<B6H",
-                2 if i < 4 else 1,                     # cube type
-                *(
-                    [TEXTURE_GROUND] * 6
-                    if i < 4 else
-                    [TEXTURE_SKY] * 6
-                )
-            )
-            for i in range(8)
-        )
+        # Each brush is stored directly in one of the root's children.  Two
+        # cubes are shrunk so they overlap at the centre, forming a corner.
+        # A third cube becomes a shallow ramp. All remaining children stay
+        # empty so the map only contains the few brushes we define here.
+
+        children = []
+        for i in range(8):
+            if i == 1:
+                # horizontal wall along the X axis
+                wall_x = _pack_edges(0, 8, 5, 8, 0, 8)
+                children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_x))
+            elif i == 2:
+                # vertical wall along the Y axis that overlaps the first
+                wall_y = _pack_edges(5, 8, 0, 8, 0, 8)
+                children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_y))
+            elif i == 5:
+                # wedge rising from 0% to 25% height along the X axis
+                slope = _pack_edge_list([
+                    (0, 8), (0, 8), (0, 8), (0, 8),
+                    (0, 8), (0, 8), (0, 8), (0, 8),
+                    (0, 0), (0, 2), (0, 0), (0, 2)
+                ])
+                children.append(_pack_cube([TEXTURE_GROUND] * 6, slope))
+            else:
+                children.append(_empty_cube())
+
+        octree = b"".join(children)
 
         data = header + variables + texmru + entity + vslot + octree
 
