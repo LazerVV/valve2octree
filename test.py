@@ -129,7 +129,7 @@ def write_redeclipse_map(filename: str) -> None:
         diag_edges = _pack_edge_list([
             (0, 8), (0, 8), (0, 8), (0, 8),   # X edges
             (0, 8), (0, 8), (0, 8), (0, 8),   # Y edges
-            (0, 0), (0, 4), (0, 4), (0, 8)    # Z edges rise along X+Y
+            (0, 0), (0, 4), (0, 8), (0, 4)    # Z edges rise diagonally
         ])
         children.append(_pack_cube([TEXTURE_GROUND] * 6, diag_edges))
         # remaining children are just empty space
