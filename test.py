@@ -1,9 +1,10 @@
 """Generate a tiny Red Eclipse map for experimentation.
 
-The map demonstrates how a hidden container cube ("garbage" cube) can
-be subdivided to place brushes anywhere inside the map. Two thin wall
-segments meet at a corner and a small sloped cube shows how edge data
-can create ramps without voxelising the entire map.
+Two shrunken cubes are placed directly as children of the root cube so
+they resemble thin wall segments. The walls partly overlap to form a
+corner and a third cube illustrates a shallow floor wedge.  This keeps
+the octree minimal while still showing how edge bytes allow non-cubic
+geometry.
 """
 
 import struct
@@ -70,12 +71,12 @@ def _pack_children(children):
 
 
 def write_redeclipse_map(filename: str) -> None:
-    """Create a tiny Red Eclipse .mpz map built from a hidden container cube.
+    """Create a tiny Red Eclipse .mpz map with two overlapping walls and a ramp.
 
-    A large "garbage" cube sits below the playable space. It is subdivided
-    once and two of its children become thin wall segments that meet in a
-    corner. The remaining children stay empty so the container itself is
-    invisible when the map is loaded.
+    Each wall is stored directly as a child of the root cube and is made thin
+    by adjusting its edge data.  The two walls intersect in the middle of the
+    map.  Another child cube becomes a shallow wedge to demonstrate sloped
+    geometry.
     """
 
     try:
@@ -122,45 +123,31 @@ def write_redeclipse_map(filename: str) -> None:
         vslot = struct.pack("<ii", 0, -1)
 
         # --- minimal octree ------------------------------------------------
-        # To place larger brushes without spawning huge numbers of voxels we
-        # create a hidden "garbage" cube that sits below the visible part of
-        # the map. Brushes are extruded from this container by subdividing it
-        # further. Only the final cubes that represent the walls remain solid;
-        # the intermediate cubes are empty so they won't show up while
-        # playing.
+        # Each brush is stored directly in one of the root's children.  Two
+        # cubes are shrunk so they overlap at the centre, forming a corner.
+        # A third cube becomes a shallow ramp. All remaining children stay
+        # empty so the map only contains the few brushes we define here.
 
-        # child 0 of the root acts as the hidden container. All other root
-        # children stay empty.
-
-        garbage_children = []
-
-        # indices 1 and 2 meet diagonally so their cubes overlap at one
-        # corner, forming an L-shaped intersection. Index 5 contains a
-        # simple sloped cube to demonstrate non‑axis aligned geometry.
-        # All other children stay empty.
+        children = []
         for i in range(8):
-            if i == 2:
-                # wall running along the Y axis
-                wall_y = _pack_edges(6, 8, 0, 8, 0, 8)
-                garbage_children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_y))
-            elif i == 1:
-                # wall running along the X axis
-                wall_x = _pack_edges(0, 8, 6, 8, 0, 8)
-                garbage_children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_x))
+            if i == 1:
+                # horizontal wall along the X axis
+                wall_x = _pack_edges(0, 8, 5, 8, 0, 8)
+                children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_x))
+            elif i == 2:
+                # vertical wall along the Y axis that overlaps the first
+                wall_y = _pack_edges(5, 8, 0, 8, 0, 8)
+                children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_y))
             elif i == 5:
                 # wedge rising from 0% to 25% height along the X axis
                 slope = _pack_edge_list([
-                    (0, 8), (0, 8), (0, 8), (0, 8),  # x edges
-                    (0, 8), (0, 8), (0, 8), (0, 8),  # y edges
-                    (0, 0), (0, 2), (0, 0), (0, 2)   # z edges
+                    (0, 8), (0, 8), (0, 8), (0, 8),
+                    (0, 8), (0, 8), (0, 8), (0, 8),
+                    (0, 0), (0, 2), (0, 0), (0, 2)
                 ])
-                garbage_children.append(_pack_cube([TEXTURE_GROUND] * 6, slope))
+                children.append(_pack_cube([TEXTURE_GROUND] * 6, slope))
             else:
-                garbage_children.append(_empty_cube())
-
-        garbage_cube = _pack_children(garbage_children)
-
-        children = [garbage_cube] + [_empty_cube() for _ in range(7)]
+                children.append(_empty_cube())
 
         octree = b"".join(children)
 
