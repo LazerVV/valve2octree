@@ -22,8 +22,32 @@ TEXTURE_GROUND = 1
 
 
 
+def _pack_edges(sx, ex, sy, ey, sz, ez):
+    """Return the 12 byte edge array for a normal cube."""
+    edges = bytearray()
+    for s, e in ((sx, ex), (sy, ey), (sz, ez)):
+        val = (e << 4) | s
+        for _ in range(4):
+            edges.append(val)
+    return bytes(edges)
+
+
+def _pack_cube(tex, edges=None):
+    """Pack a cube. If edges is None a solid or empty cube is written."""
+    if edges is None:
+        # 2 = solid cube, 1 = empty cube. Here we assume solid if tex!=TEXTURE_SKY
+        typ = 2 if tex[0] != TEXTURE_SKY else 1
+        return struct.pack("<B6H", typ, *tex)
+
+    data = bytearray()
+    data.append(3)  # normal cube with edge data
+    data.extend(edges)
+    data.extend(struct.pack("<6H", *tex))
+    return bytes(data)
+
+
 def write_redeclipse_map(filename: str) -> None:
-    """Create a minimal Red Eclipse .mpz map with a single player start."""
+    """Create a tiny Red Eclipse .mpz map with two overlapping walls."""
 
     try:
         # ------------------------------------------------------------------
@@ -51,8 +75,8 @@ def write_redeclipse_map(filename: str) -> None:
         texmru = struct.pack("<H", 1) + struct.pack("<H", 0)
 
         # --- single entity (ET_PLAYERSTART) -------------------------------
-        # place the player roughly in the middle above the ground cubes
-        spawn_z = WORLD_SIZE / 2 + 50
+        # place the player roughly in the middle of the scene
+        spawn_z = WORLD_SIZE / 2
         entbase = struct.pack(
             "<3fB3B",
             WORLD_SIZE / 2,     # x
@@ -69,21 +93,26 @@ def write_redeclipse_map(filename: str) -> None:
         vslot = struct.pack("<ii", 0, -1)
 
         # --- minimal octree ------------------------------------------------
-        # Create the root cube with eight children. The lower four octants are
-        # solid ground blocks using the ground texture. The upper four are
-        # empty "air" using the sky texture.
-        octree = b"".join(
-            struct.pack(
-                "<B6H",
-                2 if i < 4 else 1,                     # cube type
-                *(
-                    [TEXTURE_GROUND] * 6
-                    if i < 4 else
-                    [TEXTURE_SKY] * 6
-                )
-            )
-            for i in range(8)
-        )
+        # Instead of voxelising the world we only populate a few child cubes
+        # of the root to form two thin walls that meet in a corner. Each wall
+        # is a "normal" cube with edges adjusted so the cube becomes a flat
+        # box. All remaining children stay empty.
+
+        children = []
+
+        # child 0: wall running along the Y axis (thin in X)
+        edges_wall_x = _pack_edges(0, 2, 0, 8, 0, 8)
+        children.append(_pack_cube([TEXTURE_GROUND] * 6, edges_wall_x))
+
+        # child 1: wall running along the X axis (thin in Y)
+        edges_wall_y = _pack_edges(0, 8, 0, 2, 0, 8)
+        children.append(_pack_cube([TEXTURE_GROUND] * 6, edges_wall_y))
+
+        # remaining six children are just empty space
+        for _ in range(6):
+            children.append(_pack_cube([TEXTURE_SKY] * 6))
+
+        octree = b"".join(children)
 
         data = header + variables + texmru + entity + vslot + octree
 
