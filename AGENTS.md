@@ -1,8 +1,14 @@
 I want to reverse-engineer the Cube 2: Sauerbraten map format, to write a converter from Valve 220 style Xonotic .map files that ignores Patches and only transforms brushes into the weird-ass voxel format of Cube 2. 
 
-The file test.py is your main concern now. 
+The file `test.py` is still included as a minimal example to generate a toy map.
+`convert_map.py` reads `valve220_room.map` and writes a Red&nbsp;Eclipse
+compatible `.mpz` map. Each brush is stored as one Cube&nbsp;2
+"cube" whose edges are set to the brush bounds instead of spawning
+many tiny voxels. Textures are mapped to the matching faces and the
+player start stays where it belongs. The whole map is aligned so the
+lowest brushes rest on a small solid base.
 
-It tries to create a simple map with a single cube or something to demonstrate that the map format is understood and can be loaded by red eclipse.
+`voxel_fill.py` was removed in favour of this simpler box-based approach.
 
 Try to use the files in the red-eclipse-code-src/ directory to understand how to make it work.
 
