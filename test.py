@@ -52,7 +52,7 @@ def _pack_cube(tex, edges=None):
 
 
 def write_redeclipse_map(filename: str) -> None:
-    """Create a tiny Red Eclipse .mpz map with two walls and two ramp examples."""
+    """Create a tiny Red Eclipse .mpz map with two thin walls, a shallow ramp, and a diagonal ramp."""
 
     try:
         # ------------------------------------------------------------------
@@ -116,12 +116,12 @@ def write_redeclipse_map(filename: str) -> None:
         edges_wall_y = _pack_edges(0, 8, 0, 2, 0, 8)
         children.append(_pack_cube([TEXTURE_GROUND] * 6, edges_wall_y))
 
-        # child 2: sloped floor creating a ramp. The top z edges on the right
-        # half are higher so the solid cube forms a wedge the player can walk up.
+        # child 2: sloped floor forming a shallow ramp. The solid cube tapers
+        # from ground level to a quarter of its height across the X axis.
         ramp_edges = _pack_edge_list([
             (0, 8), (0, 8), (0, 8), (0, 8),  # X edges
             (0, 8), (0, 8), (0, 8), (0, 8),  # Y edges
-            (0, 4), (0, 8), (0, 4), (0, 8)   # Z edges form the ramp
+            (0, 0), (0, 2), (0, 0), (0, 2)   # Z edges form the floor wedge
         ])
         children.append(_pack_cube([TEXTURE_GROUND] * 6, ramp_edges))
 
@@ -129,7 +129,7 @@ def write_redeclipse_map(filename: str) -> None:
         diag_edges = _pack_edge_list([
             (0, 8), (0, 8), (0, 8), (0, 8),   # X edges
             (0, 8), (0, 8), (0, 8), (0, 8),   # Y edges
-            (0, 4), (0, 6), (0, 6), (0, 8)    # Z edges rise along X+Y
+            (0, 0), (0, 4), (0, 4), (0, 8)    # Z edges rise along X+Y
         ])
         children.append(_pack_cube([TEXTURE_GROUND] * 6, diag_edges))
         # remaining children are just empty space
