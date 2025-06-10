@@ -2,8 +2,8 @@
 
 The map demonstrates how a hidden container cube ("garbage" cube) can
 be subdivided to place brushes anywhere inside the map. Two thin wall
-segments meet at a right angle and a small sloped cube shows how edge
-data can create ramps without voxelising the entire map.
+segments meet at a corner and a small sloped cube shows how edge data
+can create ramps without voxelising the entire map.
 """
 
 import struct
@@ -134,24 +134,25 @@ def write_redeclipse_map(filename: str) -> None:
 
         garbage_children = []
 
-        # indices 6 and 7 form a corner by touching each other along the
-        # x=128 plane. index 5 contains a simple sloped cube to demonstrate
-        # non-axis aligned geometry. All other children stay empty.
+        # indices 1 and 2 meet diagonally so their cubes overlap at one
+        # corner, forming an L-shaped intersection. Index 5 contains a
+        # simple sloped cube to demonstrate non‑axis aligned geometry.
+        # All other children stay empty.
         for i in range(8):
-            if i == 6:
+            if i == 2:
                 # wall running along the Y axis
                 wall_y = _pack_edges(6, 8, 0, 8, 0, 8)
                 garbage_children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_y))
-            elif i == 7:
+            elif i == 1:
                 # wall running along the X axis
-                wall_x = _pack_edges(0, 2, 0, 8, 0, 8)
+                wall_x = _pack_edges(0, 8, 6, 8, 0, 8)
                 garbage_children.append(_pack_cube([TEXTURE_GROUND] * 6, wall_x))
             elif i == 5:
-                # diagonal ramp rising from 0 to 25% height along the X axis
+                # wedge rising from 0% to 25% height along the X axis
                 slope = _pack_edge_list([
                     (0, 8), (0, 8), (0, 8), (0, 8),  # x edges
                     (0, 8), (0, 8), (0, 8), (0, 8),  # y edges
-                    (0, 2), (0, 8), (0, 2), (0, 8)   # z edges
+                    (0, 0), (0, 2), (0, 0), (0, 2)   # z edges
                 ])
                 garbage_children.append(_pack_cube([TEXTURE_GROUND] * 6, slope))
             else:
